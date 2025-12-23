@@ -43,12 +43,12 @@ router.post("/register", async (req: Request, res: Response) => {
         });
 
         // Generate JWT
-        const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: "7d" });
+        const token = jwt.sign({ userId: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
 
         res.status(201).json({
             message: "User created successfully",
             token,
-            user: { id: user.id, email: user.email, name: user.name }
+            user: { id: user.id, email: user.email, name: user.name, role: user.role }
         });
     } catch (error) {
         console.error("Register error:", error);
@@ -75,11 +75,11 @@ router.post("/login", async (req: Request, res: Response) => {
         }
 
         // Generate JWT
-        const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: "7d" });
+        const token = jwt.sign({ userId: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
 
         res.json({
             token,
-            user: { id: user.id, email: user.email, name: user.name }
+            user: { id: user.id, email: user.email, name: user.name, role: user.role }
         });
     } catch (error) {
         console.error("Login error:", error);
@@ -103,7 +103,7 @@ router.get("/me", async (req: Request, res: Response) => {
         const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; email: string };
         const user = await prisma.user.findUnique({
             where: { id: decoded.userId },
-            select: { id: true, email: true, name: true, image: true }
+            select: { id: true, email: true, name: true, image: true, role: true }
         });
 
         if (!user) {

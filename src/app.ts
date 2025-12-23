@@ -5,6 +5,7 @@ import chatRouter from "./routes/chat";
 import authRouter from "./routes/auth";
 import chatsRouter from "./routes/chats";
 import uploadRouter from "./routes/upload";
+import adminRouter from "./routes/admin";
 import { config } from "./config";
 
 const app = express();
@@ -33,6 +34,7 @@ app.use("/api/chat", chatRouter);      // SSE streaming chat
 app.use("/api/auth", authRouter);      // Auth (register, login)
 app.use("/api/chats", chatsRouter);    // Chat persistence (CRUD)
 app.use("/api/upload", uploadRouter);  // File uploads
+app.use("/api/admin", adminRouter);    // Admin dashboard
 
 // Health Check
 app.get("/health", (req, res) => {
