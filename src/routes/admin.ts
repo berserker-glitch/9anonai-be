@@ -106,4 +106,81 @@ router.get("/stats", authenticateSuperAdmin, async (req: Request, res: Response)
     }
 });
 
+// GET /api/admin/users/:userId/chats - Get all conversations for a specific user
+router.get("/users/:userId/chats", authenticateSuperAdmin, async (req: Request, res: Response) => {
+    try {
+        const { userId } = req.params;
+
+        // Verify user exists
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, email: true, name: true }
+        });
+
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const chats = await prisma.chat.findMany({
+            where: { userId },
+            orderBy: { updatedAt: "desc" },
+            select: {
+                id: true,
+                title: true,
+                createdAt: true,
+                updatedAt: true,
+                _count: {
+                    select: { messages: true }
+                }
+            }
+        });
+
+        res.json({
+            user,
+            chats: chats.map(chat => ({
+                ...chat,
+                messageCount: chat._count.messages
+            }))
+        });
+    } catch (error) {
+        console.error("Error fetching user chats:", error);
+        res.status(500).json({ error: "Failed to fetch user chats" });
+    }
+});
+
+// GET /api/admin/chats/:chatId/messages - Get all messages for a specific chat
+router.get("/chats/:chatId/messages", authenticateSuperAdmin, async (req: Request, res: Response) => {
+    try {
+        const { chatId } = req.params;
+
+        const chat = await prisma.chat.findUnique({
+            where: { id: chatId },
+            include: {
+                user: {
+                    select: { id: true, email: true, name: true }
+                },
+                messages: {
+                    orderBy: { createdAt: "asc" },
+                    select: {
+                        id: true,
+                        role: true,
+                        content: true,
+                        createdAt: true,
+                        sources: true
+                    }
+                }
+            }
+        });
+
+        if (!chat) {
+            return res.status(404).json({ error: "Chat not found" });
+        }
+
+        res.json(chat);
+    } catch (error) {
+        console.error("Error fetching chat messages:", error);
+        res.status(500).json({ error: "Failed to fetch chat messages" });
+    }
+});
+
 export default router;
