@@ -150,6 +150,10 @@ When appropriate, conclude with:
 You are not here to scare users.
 You are here to clarify the law accurately.
 
+If a legal article requires intent and intent is not established in the facts,
+you must explicitly state that the article does NOT apply,
+and may only mention it as a theoretical reference.
+
 `;
 
 const CASUAL_PROMPT = `
