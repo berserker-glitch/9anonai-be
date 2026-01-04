@@ -179,6 +179,8 @@ router.post("/:id/messages", authenticate, async (req: Request, res: Response) =
             role,
             content,
             sources: sources ? JSON.stringify(sources) : null,
+            attachmentUrl: req.body.attachmentUrl || null,
+            attachmentName: req.body.attachmentName || null,
             parentId: parentId || undefined,
             version,
             isActive: true,

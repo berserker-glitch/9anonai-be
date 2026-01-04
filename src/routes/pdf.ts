@@ -13,12 +13,19 @@ if (!JWT_SECRET) {
 
 // Auth middleware
 const authenticate = (req: Request, res: Response, next: Function) => {
+    let token: string | undefined;
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+        token = authHeader.split(" ")[1];
+    } else if (req.query.token) {
+        token = req.query.token as string;
+    }
+
+    if (!token) {
         return res.status(401).json({ error: "No token provided" });
     }
 
-    const token = authHeader.split(" ")[1];
     try {
         const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
         (req as any).userId = decoded.userId;
@@ -128,6 +135,34 @@ router.get("/:id", authenticate, async (req: Request, res: Response) => {
     }
 });
 
+// GET /api/pdf/download/:id - Download a generated document
+router.get("/download/:id", authenticate, async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).userId;
+        const { id } = req.params;
+
+        const document = await prisma.generatedDocument.findUnique({
+            where: { id, userId }
+        });
+
+        if (!document) {
+            return res.status(404).json({ error: "Document not found" });
+        }
+
+        // The path stored in database is absolute, use it directly
+        const filepath = document.path;
+        if (!fs.existsSync(filepath)) {
+            console.error(`File not found at path: ${filepath}`);
+            return res.status(404).json({ error: "File not found on server" });
+        }
+
+        res.download(filepath, document.filename);
+    } catch (error) {
+        console.error("Error downloading document:", error);
+        res.status(500).json({ error: "Failed to download document" });
+    }
+});
+
 // DELETE /api/pdf/:id - Delete a generated document
 router.delete("/:id", authenticate, async (req: Request, res: Response) => {
     try {
@@ -142,8 +177,8 @@ router.delete("/:id", authenticate, async (req: Request, res: Response) => {
             return res.status(404).json({ error: "Document not found" });
         }
 
-        // Delete from filesystem
-        const filepath = path.join(__dirname, "../../", document.path);
+        // Delete from filesystem - path in DB is absolute
+        const filepath = document.path;
         if (fs.existsSync(filepath)) {
             fs.unlinkSync(filepath);
         }

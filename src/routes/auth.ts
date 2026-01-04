@@ -48,7 +48,7 @@ router.post("/register", async (req: Request, res: Response) => {
         res.status(201).json({
             message: "User created successfully",
             token,
-            user: { id: user.id, email: user.email, name: user.name, role: user.role }
+            user: { id: user.id, email: user.email, name: user.name, role: user.role, isOnboarded: user.isOnboarded }
         });
     } catch (error) {
         console.error("Register error:", error);
@@ -79,7 +79,7 @@ router.post("/login", async (req: Request, res: Response) => {
 
         res.json({
             token,
-            user: { id: user.id, email: user.email, name: user.name, role: user.role }
+            user: { id: user.id, email: user.email, name: user.name, role: user.role, isOnboarded: user.isOnboarded }
         });
     } catch (error) {
         console.error("Login error:", error);
@@ -103,7 +103,7 @@ router.get("/me", async (req: Request, res: Response) => {
         const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; email: string };
         const user = await prisma.user.findUnique({
             where: { id: decoded.userId },
-            select: { id: true, email: true, name: true, image: true, role: true }
+            select: { id: true, email: true, name: true, image: true, role: true, personalization: true, isOnboarded: true, marketingSource: true }
         });
 
         if (!user) {
@@ -113,6 +113,85 @@ router.get("/me", async (req: Request, res: Response) => {
         res.json({ user });
     } catch (error) {
         res.status(401).json({ error: "Invalid token" });
+    }
+});
+
+// PATCH /api/auth/profile
+router.patch("/profile", async (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "No token provided" });
+    }
+    const token = authHeader.split(" ")[1];
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; email: string };
+        const { name, personalization, isOnboarded, marketingSource } = req.body;
+
+        console.log("DEBUG /profile UPDATE for user", decoded.userId, "Body:", req.body);
+
+        const data: any = {};
+        if (name !== undefined) data.name = name;
+        if (personalization !== undefined) data.personalization = personalization;
+        if (isOnboarded !== undefined) data.isOnboarded = isOnboarded;
+        if (marketingSource !== undefined) data.marketingSource = marketingSource;
+
+        console.log("DEBUG /profile DATA TO SAVE:", data);
+
+        const updatedUser = await prisma.user.update({
+            where: { id: decoded.userId },
+            data,
+            select: { id: true, email: true, name: true, role: true, personalization: true, isOnboarded: true }
+        });
+
+        console.log("DEBUG /profile UPDATED USER:", updatedUser);
+
+        res.json({
+            message: "Profile updated successfully",
+            user: updatedUser
+        });
+    } catch (error) {
+        console.error("Profile update error:", error);
+        res.status(401).json({ error: "Invalid token or update failed" });
+    }
+});
+
+// POST /api/auth/change-password
+router.post("/change-password", async (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "No token provided" });
+    }
+    const token = authHeader.split(" ")[1];
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; email: string };
+        const { currentPassword, newPassword } = req.body;
+
+        if (!newPassword || newPassword.length < 6) {
+            return res.status(400).json({ error: "New password must be at least 6 characters" });
+        }
+
+        const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const passwordMatch = await bcrypt.compare(currentPassword, user.password);
+        if (!passwordMatch) {
+            return res.status(401).json({ error: "Incorrect current password" });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { password: hashedPassword }
+        });
+
+        res.json({ message: "Password changed successfully" });
+    } catch (error) {
+        console.error("Change password error:", error);
+        res.status(401).json({ error: "Invalid token or request failed" });
     }
 });
 

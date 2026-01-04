@@ -13,6 +13,9 @@ model User {
   password      String
   name          String?
   image         String?
+  personalization String? @db.Text
+  marketingSource String?
+  isOnboarded     Boolean   @default(false)
   role          String    @default("user")  // "user" | "superadmin"
   createdAt     DateTime  @default(now())
   chats         Chat[]
@@ -36,6 +39,8 @@ model Message {
   role      String
   content   String   @db.Text
   sources   String?  @db.Text
+  attachmentUrl String? // Link to generated PDF
+  attachmentName String? 
   feedback  String?  // "like" | "dislike" | null
   parentId  String?  // For regeneration versioning
   version   Int      @default(1)

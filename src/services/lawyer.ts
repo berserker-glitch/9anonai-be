@@ -3,6 +3,7 @@ import { config } from "../config";
 import { classifyIntent, isObviouslyCasual, Intent } from "./intent-classifier";
 import { routeQuery, buildContext } from "./query-router";
 import { generateContract, ContractData } from "./contract-generator";
+import { prisma } from "./prisma";
 
 const client = new OpenAI({
     baseURL: config.openRouterBaseUrl,
@@ -321,6 +322,59 @@ export async function* getLegalAdviceStream(
         // Detect user's language
         const userLang = detectLanguage(userQuery);
 
+        // Fetch User Personalization
+        let personalizationContext = "";
+        if (userId) {
+            try {
+                const user = await prisma.user.findUnique({
+                    where: { id: userId },
+                    select: { personalization: true }
+                });
+                if (user?.personalization) {
+                    let customContext = "";
+                    try {
+                        // Try to parse as JSON (new format)
+                        const parsed = JSON.parse(user.personalization);
+                        if (typeof parsed === 'object' && parsed !== null) {
+                            if (parsed.tones && Array.isArray(parsed.tones) && parsed.tones.length > 0) {
+                                customContext += `PREFERRED TONE/STYLE: ${parsed.tones.join(", ")}.\n`;
+                            }
+                            if (parsed.customInstructions) {
+                                customContext += `CUSTOM INSTRUCTIONS: ${parsed.customInstructions}\n`;
+                            }
+                            if (parsed.spokenLanguage) {
+                                if (parsed.spokenLanguage === "auto") {
+                                    // Detect language from user's query and make it explicit
+                                    const detectedLang = detectLanguage(userQuery);
+                                    const langNames: Record<string, string> = { "en": "English", "fr": "French", "ar": "Arabic" };
+                                    const detectedLangName = langNames[detectedLang] || "English";
+                                    customContext += `USER LANGUAGE SETTING: Auto-detect is ON. The user's latest message is in ${detectedLangName}. You MUST respond in ${detectedLangName}.\n`;
+                                } else {
+                                    // Map codes to full names
+                                    const langMap: Record<string, string> = { "en": "English", "fr": "French", "ar": "Arabic" };
+                                    const langName = langMap[parsed.spokenLanguage] || parsed.spokenLanguage;
+                                    customContext += `User Profile Preference: ${langName}.\n`;
+                                    customContext += `CRITICAL INSTRUCTION: You must ALWAYS match the language of the user's latest message. If the user writes in English, reply in English. If French, reply in French. If Arabic, reply in Arabic. The "Profile Preference" is ONLY a fallback for ambiguous inputs. DO NOT reply in ${langName} if the user is speaking a different language.\n`;
+                                }
+                            }
+                        } else {
+                            // Valid JSON but not object (e.g. quoted string)
+                            customContext = String(parsed);
+                        }
+                    } catch (e) {
+                        // detailed error or plain text fallback
+                        customContext = user.personalization;
+                    }
+
+                    if (customContext.trim()) {
+                        personalizationContext = `\n\n=== USER PERSONALIZATION ===\n${customContext}\n============================\n`;
+                    }
+                }
+            } catch (e) {
+                console.warn("Failed to fetch personalization", e);
+            }
+        }
+
         // 1. Quick casual check
         let intent: Intent;
 
@@ -351,7 +405,7 @@ export async function* getLegalAdviceStream(
             const stream = await client.chat.completions.create({
                 model: "google/gemini-3-flash-preview",
                 messages: [
-                    { role: "system", content: CASUAL_PROMPT },
+                    { role: "system", content: CASUAL_PROMPT + personalizationContext },
                     ...history.slice(-10),
                     { role: "user", content: buildUserContent(userQuery) }
                 ],
@@ -414,7 +468,7 @@ export async function* getLegalAdviceStream(
                     const response = await client.chat.completions.create({
                         model: "google/gemini-3-flash-preview",
                         messages: [
-                            { role: "system", content: DOC_GEN_SYSTEM_PROMPT },
+                            { role: "system", content: DOC_GEN_SYSTEM_PROMPT + personalizationContext },
                             { role: "user", content: `Previous conversation:\n${conversationContext}\n\nLatest request: ${userQuery}\n\nGenerate the contract now.` }
                         ],
                         tools: [CONTRACT_TOOL],
@@ -472,7 +526,7 @@ export async function* getLegalAdviceStream(
                 const stream = await client.chat.completions.create({
                     model: "google/gemini-3-flash-preview",
                     messages: [
-                        { role: "system", content: SYSTEM_PROMPT },
+                        { role: "system", content: SYSTEM_PROMPT + personalizationContext },
                         ...history.slice(-6).map((m: any) => ({ role: m.role, content: m.content })),
                         { role: "user", content: buildUserContent(userContent) }
                     ],

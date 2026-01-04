@@ -1,6 +1,7 @@
 import puppeteer from "puppeteer";
 import fs from "fs";
 import path from "path";
+import { prisma } from "./prisma";
 
 const GENERATED_PDFS_DIR = path.join(__dirname, "../../uploads/pdfs-generated");
 
@@ -296,17 +297,37 @@ export async function generateFlexiblePDF(
         });
 
         console.log(`PDF generated successfully: ${filepath}`);
+
+        // Save to Database
+        const doc = await prisma.generatedDocument.create({
+            data: {
+                type,
+                title,
+                filename,
+                path: filepath, // OR relative path? FilesModal uses API to list.
+                // The API /download/:id uses filepath from DB to res.download.
+                // res.download checks fs.exists(document.path).
+                // So storing ABSOLUTE path is fine if backend runs on same machine.
+                // But usually relative is safer.
+                // However, pdf.ts code: `if (fs.existsSync(document.path))` implies absolute or relative to CWD.
+                // EnsureDirectoryExists returns absolute.
+                // So storing absolute path is consistent with current usage.
+                userId,
+                metadata: JSON.stringify({ language })
+            }
+        });
+
+        return {
+            id: doc.id,
+            filename: doc.filename,
+            path: doc.path,
+            type: doc.type,
+            title: doc.title
+        };
+
     } finally {
         await browser.close();
     }
-
-    return {
-        id: `doc_${timestamp}`,
-        filename,
-        path: `/uploads/pdfs-generated/${userId}/${filename}`,
-        type,
-        title
-    };
 }
 
 /**
