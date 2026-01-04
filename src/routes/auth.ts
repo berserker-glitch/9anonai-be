@@ -156,6 +156,42 @@ router.patch("/profile", async (req: Request, res: Response) => {
     }
 });
 
+// POST /api/auth/update-profile (fallback for proxies that don't support PATCH)
+router.post("/update-profile", async (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "No token provided" });
+    }
+    const token = authHeader.split(" ")[1];
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; email: string };
+        const { name, personalization, isOnboarded, marketingSource } = req.body;
+
+        console.log("DEBUG /update-profile for user", decoded.userId, "Body:", req.body);
+
+        const data: any = {};
+        if (name !== undefined) data.name = name;
+        if (personalization !== undefined) data.personalization = personalization;
+        if (isOnboarded !== undefined) data.isOnboarded = isOnboarded;
+        if (marketingSource !== undefined) data.marketingSource = marketingSource;
+
+        const updatedUser = await prisma.user.update({
+            where: { id: decoded.userId },
+            data,
+            select: { id: true, email: true, name: true, role: true, personalization: true, isOnboarded: true }
+        });
+
+        res.json({
+            message: "Profile updated successfully",
+            user: updatedUser
+        });
+    } catch (error) {
+        console.error("Profile update error:", error);
+        res.status(401).json({ error: "Invalid token or update failed" });
+    }
+});
+
 // POST /api/auth/change-password
 router.post("/change-password", async (req: Request, res: Response) => {
     const authHeader = req.headers.authorization;
