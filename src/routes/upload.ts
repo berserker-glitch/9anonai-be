@@ -3,6 +3,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import jwt from "jsonwebtoken";
+import { prisma } from "../services/prisma";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -10,10 +11,16 @@ if (!JWT_SECRET) {
     throw new Error("JWT_SECRET environment variable is required");
 }
 
-// Create uploads directory if it doesn't exist
-const uploadsDir = path.join(__dirname, "../../uploads");
+// Create uploads directory if it doesn't exist - now using user-uploaded-files
+const uploadsDir = path.join(__dirname, "../../uploads/user-uploaded-files");
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Also ensure pdfs-generated directory exists
+const pdfsDir = path.join(__dirname, "../../uploads/pdfs-generated");
+if (!fs.existsSync(pdfsDir)) {
+    fs.mkdirSync(pdfsDir, { recursive: true });
 }
 
 // Multer configuration
@@ -80,45 +87,144 @@ const authenticate = (req: Request, res: Response, next: Function) => {
 };
 
 // POST /api/upload - Upload a file
-router.post("/", authenticate, upload.single("file"), (req: Request, res: Response) => {
+router.post("/", authenticate, upload.single("file"), async (req: Request, res: Response) => {
     if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
     }
 
-    const fileUrl = `/uploads/${(req as any).userId}/${req.file.filename}`;
+    const userId = (req as any).userId;
+    const fileUrl = `/uploads/user-uploaded-files/${userId}/${req.file.filename}`;
 
-    res.json({
-        success: true,
-        file: {
-            originalName: req.file.originalname,
-            filename: req.file.filename,
-            mimetype: req.file.mimetype,
-            size: req.file.size,
-            url: fileUrl,
-        },
-    });
+    try {
+        // Save file info to database
+        const savedFile = await prisma.userFile.create({
+            data: {
+                filename: req.file.filename,
+                originalName: req.file.originalname,
+                mimetype: req.file.mimetype,
+                size: req.file.size,
+                path: fileUrl,
+                userId,
+            }
+        });
+
+        res.json({
+            success: true,
+            file: {
+                id: savedFile.id,
+                originalName: req.file.originalname,
+                filename: req.file.filename,
+                mimetype: req.file.mimetype,
+                size: req.file.size,
+                url: fileUrl,
+                createdAt: savedFile.createdAt
+            },
+        });
+    } catch (error) {
+        console.error("Error saving file to database:", error);
+        res.status(500).json({ error: "Failed to save file" });
+    }
 });
 
 // POST /api/upload/multiple - Upload multiple files
-router.post("/multiple", authenticate, upload.array("files", 5), (req: Request, res: Response) => {
+router.post("/multiple", authenticate, upload.array("files", 5), async (req: Request, res: Response) => {
     const files = req.files as Express.Multer.File[];
+    const userId = (req as any).userId;
 
     if (!files || files.length === 0) {
         return res.status(400).json({ error: "No files uploaded" });
     }
 
-    const fileInfos = files.map((file) => ({
-        originalName: file.originalname,
-        filename: file.filename,
-        mimetype: file.mimetype,
-        size: file.size,
-        url: `/uploads/${(req as any).userId}/${file.filename}`,
-    }));
+    try {
+        const savedFiles = await Promise.all(files.map(async (file) => {
+            const fileUrl = `/uploads/user-uploaded-files/${userId}/${file.filename}`;
 
-    res.json({
-        success: true,
-        files: fileInfos,
-    });
+            const saved = await prisma.userFile.create({
+                data: {
+                    filename: file.filename,
+                    originalName: file.originalname,
+                    mimetype: file.mimetype,
+                    size: file.size,
+                    path: fileUrl,
+                    userId,
+                }
+            });
+
+            return {
+                id: saved.id,
+                originalName: file.originalname,
+                filename: file.filename,
+                mimetype: file.mimetype,
+                size: file.size,
+                url: fileUrl,
+                createdAt: saved.createdAt
+            };
+        }));
+
+        res.json({
+            success: true,
+            files: savedFiles,
+        });
+    } catch (error) {
+        console.error("Error saving files to database:", error);
+        res.status(500).json({ error: "Failed to save files" });
+    }
+});
+
+// GET /api/upload/files - List user's uploaded files
+router.get("/files", authenticate, async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).userId;
+
+        const files = await prisma.userFile.findMany({
+            where: { userId },
+            orderBy: { createdAt: "desc" },
+            select: {
+                id: true,
+                filename: true,
+                originalName: true,
+                mimetype: true,
+                size: true,
+                path: true,
+                createdAt: true
+            }
+        });
+
+        res.json(files);
+    } catch (error) {
+        console.error("Error listing files:", error);
+        res.status(500).json({ error: "Failed to list files" });
+    }
+});
+
+// DELETE /api/upload/:id - Delete an uploaded file
+router.delete("/:id", authenticate, async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).userId;
+        const { id } = req.params;
+
+        const file = await prisma.userFile.findUnique({
+            where: { id, userId }
+        });
+
+        if (!file) {
+            return res.status(404).json({ error: "File not found" });
+        }
+
+        // Delete from filesystem
+        const filepath = path.join(__dirname, "../../", file.path);
+        if (fs.existsSync(filepath)) {
+            fs.unlinkSync(filepath);
+        }
+
+        // Delete from database
+        await prisma.userFile.delete({ where: { id } });
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error("Error deleting file:", error);
+        res.status(500).json({ error: "Failed to delete file" });
+    }
 });
 
 export default router;

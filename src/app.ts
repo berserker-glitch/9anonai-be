@@ -6,6 +6,7 @@ import authRouter from "./routes/auth";
 import chatsRouter from "./routes/chats";
 import uploadRouter from "./routes/upload";
 import adminRouter from "./routes/admin";
+import pdfRouter from "./routes/pdf";
 import { config } from "./config";
 
 const app = express();
@@ -35,6 +36,7 @@ app.use("/api/auth", authRouter);      // Auth (register, login)
 app.use("/api/chats", chatsRouter);    // Chat persistence (CRUD)
 app.use("/api/upload", uploadRouter);  // File uploads
 app.use("/api/admin", adminRouter);    // Admin dashboard
+app.use("/api/pdf", pdfRouter);        // PDF contract generation
 
 // Health Check
 app.get("/health", (req, res) => {

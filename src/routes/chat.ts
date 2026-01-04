@@ -1,8 +1,10 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
+import jwt from "jsonwebtoken";
 import { getLegalAdviceStream } from "../services/lawyer";
 
 const router = Router();
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // Validation Schema
 const ChatSchema = z.object({
@@ -14,7 +16,22 @@ const ChatSchema = z.object({
     })).optional(),
 });
 
-router.post("/", async (req: Request, res: Response) => {
+// Optional auth middleware - extracts userId if token present
+const optionalAuth = (req: Request, res: Response, next: Function) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ") && JWT_SECRET) {
+        const token = authHeader.split(" ")[1];
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+            (req as any).userId = decoded.userId;
+        } catch (error) {
+            // Token invalid, continue without userId
+        }
+    }
+    next();
+};
+
+router.post("/", optionalAuth, async (req: Request, res: Response) => {
     // Set Headers for SSE
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -22,9 +39,10 @@ router.post("/", async (req: Request, res: Response) => {
 
     try {
         const { message, history, images } = ChatSchema.parse(req.body);
+        const userId = (req as any).userId;
 
-        // Consume Stream
-        const stream = getLegalAdviceStream(message, history || [], images || []);
+        // Consume Stream - pass userId for contract generation
+        const stream = getLegalAdviceStream(message, history || [], images || [], userId);
 
         for await (const event of stream) {
             // Write event to stream

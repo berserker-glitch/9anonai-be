@@ -16,6 +16,8 @@ model User {
   role          String    @default("user")  // "user" | "superadmin"
   createdAt     DateTime  @default(now())
   chats         Chat[]
+  files         UserFile[]
+  documents     GeneratedDocument[]
 }
 
 model Chat {
@@ -40,5 +42,29 @@ model Message {
   isActive  Boolean  @default(true)
   chatId    String
   chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model UserFile {
+  id           String   @id @default(cuid())
+  filename     String
+  originalName String
+  mimetype     String
+  size         Int
+  path         String
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+}
+
+model GeneratedDocument {
+  id        String   @id @default(cuid())
+  type      String   // "employment", "rental", "nda", "service", etc.
+  title     String
+  filename  String
+  path      String
+  metadata  String?  @db.Text // JSON of contract details
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 }
