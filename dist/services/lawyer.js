@@ -8,6 +8,8 @@ const openai_1 = __importDefault(require("openai"));
 const config_1 = require("../config");
 const intent_classifier_1 = require("./intent-classifier");
 const query_router_1 = require("./query-router");
+const contract_generator_1 = require("./contract-generator");
+const prisma_1 = require("./prisma");
 const client = new openai_1.default({
     baseURL: config_1.config.openRouterBaseUrl,
     apiKey: config_1.config.openRouterApiKey,
@@ -16,182 +18,173 @@ const client = new openai_1.default({
         "X-Title": "9anon - Moroccan Legal AI",
     },
 });
+// Tool definition - now takes full content from AI
+const CONTRACT_TOOL = {
+    type: "function",
+    function: {
+        name: "generate_contract",
+        description: "Generate a PDF document from the contract content you write.",
+        parameters: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    enum: ["rental", "employment", "service", "nda", "sales", "custom"],
+                    description: "Type of contract"
+                },
+                title: {
+                    type: "string",
+                    description: "Document title"
+                },
+                language: {
+                    type: "string",
+                    enum: ["en", "fr", "ar"],
+                    description: "Document language"
+                },
+                content: {
+                    type: "string",
+                    description: "The FULL contract content you have written. Include all articles, clauses, party details, and terms."
+                }
+            },
+            required: ["type", "language", "content"]
+        }
+    }
+};
+// Prompt for document generation - AI writes complete document (ANY type)
+const DOC_GEN_SYSTEM_PROMPT = `You are a Moroccan legal document writer. Write ANY type of legal document based on the user's request.
+
+YOUR TASK:
+1. Write the COMPLETE document content with all necessary sections
+2. Use information from the conversation
+3. For missing info, use placeholders like [NAME], [AMOUNT], [DATE], etc.
+4. Call generate_contract with your written content
+
+YOU CAN WRITE ANY DOCUMENT:
+- Rental/Lease agreements (Contrat de bail)
+- Employment contracts (Contrat de travail)
+- Service agreements (Contrat de prestation)
+- Sales contracts (Contrat de vente)
+- NDAs (Accord de confidentialité)
+- Power of attorney (Procuration)
+- Letters of demand
+- Termination notices
+- Any other legal document the user requests
+
+MANDATORY LEGAL CLAUSES (ALWAYS INCLUDE):
+1. CONSEQUENCES & PENALTIES:
+   - Late payment penalties (e.g., 5-10% per month delay)
+   - Breach of contract consequences
+   - Damages and compensation clauses
+   - Interest on overdue amounts
+
+2. TERMINATION PROVISIONS:
+   - Grounds for immediate termination
+   - Notice periods required
+   - Consequences of early termination
+   - Obligations upon termination
+
+3. DISPUTE RESOLUTION:
+   - Amicable settlement attempt requirement
+   - Competent court jurisdiction
+   - Arbitration clauses if applicable
+
+4. ENFORCEMENT:
+   - Right to legal action
+   - Seizure/attachment rights for unpaid debts
+   - Eviction procedures (for rental)
+   - Recovery of legal costs
+
+DOCUMENT STRUCTURE:
+- Title and date
+- Party identification (with CIN numbers)
+- Main clauses/articles
+- Terms and conditions
+- Consequences and penalties section
+- Termination conditions
+- Dispute resolution
+- Signature blocks
+- Legal references
+
+CRITICAL - LANGUAGE FOR PDF:
+- Match the user's language for the PDF content
+- English user = English PDF
+- French user = French PDF  
+- Arabic user = Arabic PDF (full Arabic support is available)
+- Use proper legal terminology for each language
+
+RULES:
+- Be professional and thorough
+- Include relevant Moroccan law references (Law 67.12 for rental, Labor Code for employment, D.O.C for general contracts)
+- Make contracts legally solid and enforceable
+- EVERY contract must have consequences for breach`;
 const SYSTEM_PROMPT = `
-You are 9anon (قانون), a Moroccan law expert AI designed to provide accurate, cautious, and well-reasoned legal information based strictly on Moroccan law.
+You are 9anon, a Moroccan law expert AI assistant.
 
-────────────────────────────────
-CORE IDENTITY & MISSION
-────────────────────────────────
-You are a LEGAL REASONING ASSISTANT specialized in Moroccan law. Your mission is to:
-- Provide precise, well-researched legal information
-- Guide users through legal procedures and their rights
-- Generate professional legal documents when requested
-- Always prioritize accuracy over speed
+CRITICAL FORMATTING RULES:
+1. NEVER use emojis in your responses
+2. RESPOND IN THE EXACT SAME LANGUAGE AS THE USER
+3. Be professional and concise
 
-────────────────────────────────
-LANGUAGE ADAPTABILITY (CRITICAL)
-────────────────────────────────
-You MUST mirror the user's language exactly:
-- French → Respond 100% in French
-- English → Respond 100% in English  
-- Arabic (العربية) → Respond in formal Arabic
-- Darija (Moroccan Arabic) → Match their dialect (Arabic or Latin script)
+LANGUAGE MATCHING:
+- English message = English response
+- French message = French response
+- Arabic message = Arabic response
 
-NEVER mix languages within a response.
-NEVER default to Arabic unless the user uses Arabic.
+DOCUMENT GENERATION REQUESTS:
+When user asks to create, draft, or generate a contract:
 
-────────────────────────────────
-RESPONSE CALIBRATION
-────────────────────────────────
-Adapt your response length and depth based on query complexity:
+STEP 1 - COLLECT INFORMATION:
+First, politely ask for the necessary details:
+- For rental contracts: landlord name/ID/address, tenant name/ID/address, property address, rent amount, deposit, start date
+- For employment contracts: employer details, employee details, position, salary, start date
+- For other contracts: relevant party details and terms
 
-**Simple Questions** (definitions, yes/no, basic procedures):
-→ Be concise (2-4 paragraphs max)
-→ Direct answer first, then brief explanation
-→ Example: "What is the minimum wage?" → State the amount, cite the source, done.
+STEP 2 - CONFIRM AND GENERATE:
+Once the user provides the information, briefly confirm-you have what you need. The PDF will be generated automatically by the system.
 
-**Moderate Questions** (procedures, rights explanations):
-→ Structured response with clear sections
-→ Include relevant articles and procedures
-→ Provide practical next steps
+IMPORTANT:
+- NEVER write out the full contract text yourself
+- NEVER mention "tools" or "functions" 
+- NEVER say you will "use a tool" or "call a function"
+- Just ask for info, then confirm and the system handles the rest
 
-**Complex Questions** (case analysis, multi-domain issues):
-→ Comprehensive analysis with proper structure:
-  1. Summary of the situation
-  2. Applicable legal framework
-  3. Detailed analysis
-  4. Possible outcomes/scenarios
-  5. Recommended actions
-→ Always acknowledge uncertainties
+LEGAL GUIDANCE:
+- Cite specific Moroccan law articles when relevant
+- Reference Law 67.12 for rentals, Labor Code for employment
+- Always recommend consulting a legal professional
 
-────────────────────────────────
-DOCUMENT GENERATION MODE
-────────────────────────────────
-When the user asks you to generate, draft, or create a legal document (contract, agreement, letter, etc.):
+CRIMINAL LAW ANALYSIS PRINCIPLES:
+1. STRICT INTERPRETATION (التفسير الضيق):
+   - Apply the principle of narrow interpretation in criminal law
+   - Do NOT use argument by implication (مفهوم المخالفة) to create criminal liability
+   - Cite ONLY explicit statutory texts as basis for criminalization
+   - If a statute does not expressly criminalize conduct, say so clearly
 
-1. **Confirm Understanding**: Briefly confirm what type of document and key details needed
-2. **Gather Missing Info**: Ask clarifying questions if critical details are missing (names, dates, amounts, terms)
-3. **Generate Professionally**: Create a complete, properly structured legal document with:
-   - Proper Moroccan legal headers and formatting
-   - All required clauses and sections
-   - Signature blocks with appropriate spaces
-   - Date and place fields
-   - Article numbering
-4. **Offer Download**: Mention that the document can be downloaded as a PDF
+2. UNCERTAINTY AND DISPUTED MATTERS:
+   - When law is ambiguous or disputed, state: "This issue is doctrinally and judicially disputed (محل خلاف فقهي وقضائي)"
+   - Include a brief "legal uncertainty notice" when applicable
+   - Do NOT assign specific penalties unless there is a clear statutory basis
+   - Acknowledge when courts and prosecution have discretion in re-qualification
 
-Document types you can generate:
-- Employment contracts (عقد العمل / Contrat de travail)
-- Rental/lease agreements (عقد الكراء / Contrat de bail)
-- Service agreements
-- NDAs / Confidentiality agreements
-- Sales contracts
-- Power of attorney
-- Formal legal notices
-- Demand letters
+3. PROPER LEGAL QUALIFICATION:
+   - Preserve distinctions between: threat, attempt, and beginning of execution
+   - Mention possible alternative qualifications (e.g., psychological violence under Law 103.13, harassment)
+   - Clearly state when conduct may lack clear criminal characterization under current law
+   - Attribute final qualification authority to courts and prosecution (النيابة العامة والقضاء)
 
-────────────────────────────────
-LEGAL REASONING RULES (MANDATORY)
-────────────────────────────────
-
-1. **ELEMENT-BASED APPLICATION**
-Only apply a legal article if ALL elements are satisfied:
-- Material element (الركن المادي)
-- Moral element / intent (الركن المعنوي)
-If any element is unclear → explicitly state non-applicability.
-
-2. **PRESUMPTION OF GOOD FAITH**
-Unless criminal intent is clearly established:
-- Presume absence of malicious intent
-- Do NOT infer criminal purpose without evidence
-
-3. **GRADUAL LIABILITY ANALYSIS**
-Analyze in this order (never skip levels):
-1) Accident → 2) Negligence → 3) Misdemeanor → 4) Felony
-Never escalate to criminal liability without clear justification.
-
-4. **NO OVER-CRIMINALIZATION**
-- Do NOT stack multiple crimes
-- Do NOT invent legal exposure
-- Discuss only directly relevant offenses
-
-5. **DOMAIN ISOLATION**
-Stay within the relevant legal domain. If the case is criminal, do NOT introduce family law or professional law unless strictly necessary.
-
-6. **PROPER CITATIONS**
-When citing articles:
-- State the specific article number
-- Name the legal code (القانون الجنائي, مدونة الأسرة, etc.)
-- Briefly explain WHY it applies
-
-────────────────────────────────
-HANDLING UNCERTAINTY
-────────────────────────────────
-When the legal outcome is uncertain:
-- Clearly state: "This depends on judicial interpretation..." / "Cela dépend de l'appréciation du juge..."
-- Present possible outcomes with rough probabilities when appropriate
-- Identify the key factors that would influence the outcome
-- NEVER present uncertain outcomes as definitive
-
-────────────────────────────────
-FOLLOW-UP & CONVERSATION FLOW
-────────────────────────────────
-- Remember context from previous messages in the conversation
-- Build on previous answers without repeating information
-- If the user asks a follow-up, assume they understood your previous explanation
-- Proactively offer relevant related information when helpful
-
-────────────────────────────────
-GREETING BEHAVIOR
-────────────────────────────────
-- Only greet if the user greeted first OR it's clearly the first message
-- Otherwise, respond directly to the legal matter
-
-────────────────────────────────
-CONTEXT INTEGRATION
-────────────────────────────────
-When legal context (from RAG or web search) is provided:
-- Treat it as authoritative Moroccan legal text
-- NEVER say "based on the context you provided"
-- Use natural phrasing: "Under Moroccan law...", "According to Article X of the Penal Code..."
-- Synthesize multiple sources coherently
-
-────────────────────────────────
-CAPABILITIES & BOUNDARIES
-────────────────────────────────
-You CAN:
-✓ Explain Moroccan law and procedures
-✓ Clarify rights, obligations, and defenses
-✓ Generate draft legal documents
-✓ Explain possible legal consequences
-✓ Provide step-by-step procedure guides
-
-You CANNOT:
-✗ Provide binding legal advice (recommend consulting a lawyer for real cases)
-✗ Assist in committing crimes
-✗ Make definitive court outcome predictions
-✗ Replace professional legal representation
-
-────────────────────────────────
-CLOSING GUIDANCE
-────────────────────────────────
-When appropriate, conclude with:
-- A reminder that facts and evidence matter
-- Suggestion to consult a Moroccan lawyer for actual cases
-- WITHOUT generating fear or unnecessary alarm
-
-Your purpose: Clarify the law accurately and helpfully.
-
+4. PROFESSIONAL LANGUAGE:
+   - Use cautious, measured legal language
+   - Avoid definitive statements about criminal liability when law is unclear
+   - Present multiple interpretations when they exist
+   - Always recommend verification with a practicing lawyer or judicial authority
 `;
 const CASUAL_PROMPT = `
-You are 9anon (قانون), a friendly Moroccan law AI assistant.
+You are 9anon, a friendly Moroccan law AI assistant.
 
-CRITICAL LANGUAGE RULE: Respond in the EXACT same language as the user. If they write in French, respond in French. If English, use English. If Arabic, use Arabic. NEVER default to Arabic.
-
-GREETING RULE: Only greet if the user greeted you first or this is the first message. Otherwise, skip greetings and respond naturally.
-
-Be natural and conversational - respond like you're chatting with a friend. Match their language and energy. For casual greetings, just be friendly. For legal questions, show your expertise.
-
-Don't be formal or robotic. Keep it real and helpful.
+RULES:
+1. NEVER use emojis
+2. Respond in the same language as the user
+3. Be helpful and natural
 `;
 /**
  * Perplexity web search for real-time legal information
@@ -203,7 +196,7 @@ async function perplexitySearch(query) {
             messages: [
                 {
                     role: "system",
-                    content: "Search for Moroccan law information. Return factual, well-cited results about Moroccan legislation, legal procedures, and court practices. Focus on official sources."
+                    content: "Search for Moroccan law information. Return factual, well-cited results."
                 },
                 { role: "user", content: `Moroccan law: ${query}` }
             ],
@@ -216,8 +209,137 @@ async function perplexitySearch(query) {
         return "";
     }
 }
-async function* getLegalAdviceStream(userQuery, history = [], images = []) {
+/**
+ * Detect language from text
+ */
+function detectLanguage(text) {
+    // Arabic characters
+    if (/[\u0600-\u06FF]/.test(text))
+        return "ar";
+    // French indicators
+    if (/\b(je|tu|il|nous|vous|ils|est|sont|avoir|être|pour|dans|avec|contrat|bail|travail)\b/i.test(text))
+        return "fr";
+    // Default to English
+    return "en";
+}
+/**
+ * Check if query is asking for document generation (FULLY FLEXIBLE)
+ */
+function isDocumentRequest(query) {
+    const lowerQuery = query.toLowerCase();
+    // Generic document keywords - catches ANY type of contract/document
+    const docKeywords = ['contract', 'agreement', 'document', 'pdf', 'letter', 'notice', 'certificate', 'declaration', 'attestation', 'procuration', 'deed'];
+    const actionKeywords = ['generate', 'create', 'draft', 'make', 'write', 'prepare', 'need', 'want', 'give', 'can you', 'regenerate', 'redo', 'resend', 'again', 'same'];
+    // French keywords
+    const frDocKeywords = ['contrat', 'accord', 'document', 'lettre', 'attestation', 'certificat', 'procuration', 'acte'];
+    const frActionKeywords = ['créer', 'rédiger', 'générer', 'préparer', 'faire', 'donner', 'veux', 'besoin', 'refaire', 'même', 'nouveau'];
+    // Check if query contains any document keyword
+    const hasDocKeyword = docKeywords.some(k => lowerQuery.includes(k)) ||
+        frDocKeywords.some(k => lowerQuery.includes(k));
+    // Check if query contains any action keyword
+    const hasActionKeyword = actionKeywords.some(k => lowerQuery.includes(k)) ||
+        frActionKeywords.some(k => lowerQuery.includes(k));
+    // Arabic patterns - very broad
+    const arabicDocPattern = /عقد|وثيقة|اتفاقية|رسالة|شهادة|توكيل|صك|اعطني|اكتب|صياغة|انشاء|حرر/;
+    // Return true if we have both document and action keywords, OR just document keyword with context
+    return (hasDocKeyword && hasActionKeyword) ||
+        (hasDocKeyword && lowerQuery.length < 100) || // Short request with doc keyword
+        arabicDocPattern.test(query);
+}
+/**
+ * Check if conversation has enough info to generate contract
+ */
+function hasEnoughContractInfo(query, history) {
+    // Combine all conversation text
+    const fullConvo = history.map(m => m.content || "").join(" ") + " " + query;
+    const lowerQuery = query.toLowerCase();
+    // If user is asking to regenerate/resend PDF or change language, and there's history, allow it
+    const regenerateKeywords = [
+        'regenerate', 'same pdf', 'same contract', 'again', 'resend', 'redo',
+        'in french', 'in english', 'in arabic', 'en français', 'بالعربية',
+        'generate it', 'create it', 'want it', 'be in arabic', 'be in french', 'be in english',
+        'arabic version', 'french version', 'english version',
+        'بالعربي', 'version arabe', 'version française'
+    ];
+    const isRegenerateRequest = regenerateKeywords.some(k => lowerQuery.includes(k));
+    if (isRegenerateRequest && history.length > 2) {
+        // User wants to regenerate in a different language or same PDF - allow it
+        return true;
+    }
+    // Check for party names in the full conversation
+    // Arabic names pattern - looking for Arabic text with spaces
+    const arabicNamePattern = /[\u0600-\u06FF]{3,}\s+(?:بن\s+)?[\u0600-\u06FF]{3,}/g;
+    const arabicMatches = fullConvo.match(arabicNamePattern) || [];
+    // Western/transliterated names
+    const westernNamePattern = /\b[A-Z][a-z]+\s+(?:Ben\s+|Ibn\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b/g;
+    const westernMatches = fullConvo.match(westernNamePattern) || [];
+    const nameCount = arabicMatches.length + westernMatches.length;
+    // Check for monetary amounts (dirhams) or property details
+    const hasAmounts = /\d{1,3}(?:[,.\s]?\d{3})*\s*(?:MAD|DH|درهم|dirhams?)/i.test(fullConvo);
+    const hasProperty = /(?:رقم|عقار|شقة|منزل|أرض|property|apartment|house)/i.test(fullConvo);
+    const hasCIN = /(?:[A-Z]{1,2}\d{5,}|بطاقة|CIN|carte)/i.test(fullConvo);
+    // More flexible: need at least 2 names OR (1 name + amounts/property/CIN)
+    return nameCount >= 2 || (nameCount >= 1 && (hasAmounts || hasProperty || hasCIN));
+}
+async function* getLegalAdviceStream(userQuery, history = [], images = [], userId) {
     try {
+        // Detect user's language
+        const userLang = detectLanguage(userQuery);
+        // Fetch User Personalization
+        let personalizationContext = "";
+        if (userId) {
+            try {
+                const user = await prisma_1.prisma.user.findUnique({
+                    where: { id: userId },
+                    select: { personalization: true }
+                });
+                if (user?.personalization) {
+                    let customContext = "";
+                    try {
+                        // Try to parse as JSON (new format)
+                        const parsed = JSON.parse(user.personalization);
+                        if (typeof parsed === 'object' && parsed !== null) {
+                            if (parsed.tones && Array.isArray(parsed.tones) && parsed.tones.length > 0) {
+                                customContext += `PREFERRED TONE/STYLE: ${parsed.tones.join(", ")}.\n`;
+                            }
+                            if (parsed.customInstructions) {
+                                customContext += `CUSTOM INSTRUCTIONS: ${parsed.customInstructions}\n`;
+                            }
+                            if (parsed.spokenLanguage) {
+                                if (parsed.spokenLanguage === "auto") {
+                                    // Detect language from user's query and make it explicit
+                                    const detectedLang = detectLanguage(userQuery);
+                                    const langNames = { "en": "English", "fr": "French", "ar": "Arabic" };
+                                    const detectedLangName = langNames[detectedLang] || "English";
+                                    customContext += `USER LANGUAGE SETTING: Auto-detect is ON. The user's latest message is in ${detectedLangName}. You MUST respond in ${detectedLangName}.\n`;
+                                }
+                                else {
+                                    // Map codes to full names
+                                    const langMap = { "en": "English", "fr": "French", "ar": "Arabic" };
+                                    const langName = langMap[parsed.spokenLanguage] || parsed.spokenLanguage;
+                                    customContext += `User Profile Preference: ${langName}.\n`;
+                                    customContext += `CRITICAL INSTRUCTION: You must ALWAYS match the language of the user's latest message. If the user writes in English, reply in English. If French, reply in French. If Arabic, reply in Arabic. The "Profile Preference" is ONLY a fallback for ambiguous inputs. DO NOT reply in ${langName} if the user is speaking a different language.\n`;
+                                }
+                            }
+                        }
+                        else {
+                            // Valid JSON but not object (e.g. quoted string)
+                            customContext = String(parsed);
+                        }
+                    }
+                    catch (e) {
+                        // detailed error or plain text fallback
+                        customContext = user.personalization;
+                    }
+                    if (customContext.trim()) {
+                        personalizationContext = `\n\n=== USER PERSONALIZATION ===\n${customContext}\n============================\n`;
+                    }
+                }
+            }
+            catch (e) {
+                console.warn("Failed to fetch personalization", e);
+            }
+        }
         // 1. Quick casual check
         let intent;
         if ((0, intent_classifier_1.isObviouslyCasual)(userQuery)) {
@@ -233,7 +355,6 @@ async function* getLegalAdviceStream(userQuery, history = [], images = []) {
         const buildUserContent = (text) => {
             if (images.length === 0)
                 return text;
-            // Multimodal content for vision
             const parts = images.map(img => ({
                 type: "image_url",
                 image_url: { url: `data:${img.mimeType};base64,${img.data}` }
@@ -247,7 +368,7 @@ async function* getLegalAdviceStream(userQuery, history = [], images = []) {
             const stream = await client.chat.completions.create({
                 model: "google/gemini-3-flash-preview",
                 messages: [
-                    { role: "system", content: CASUAL_PROMPT },
+                    { role: "system", content: CASUAL_PROMPT + personalizationContext },
                     ...history.slice(-10),
                     { role: "user", content: buildUserContent(userQuery) }
                 ],
@@ -260,49 +381,108 @@ async function* getLegalAdviceStream(userQuery, history = [], images = []) {
             }
         }
         else {
-            // Legal question - Combined RAG + Perplexity Search
+            // Document generation check is done later with history context
+            const isDocRequestNow_check = isDocumentRequest(userQuery);
+            console.log("Initial doc request check:", isDocRequestNow_check, "User ID:", userId);
+            // Combined RAG + Perplexity Search
             yield { type: "step", content: "Scanning Moroccan Legal Database..." };
-            // Run RAG search and Perplexity search in parallel
             const [routeResult, perplexityResults] = await Promise.all([
                 (0, query_router_1.routeQuery)(intent, userQuery),
                 perplexitySearch(userQuery)
             ]);
             let contextParts = [];
             let allSources = routeResult.sources;
-            // Add RAG results
             if (routeResult.sources.length > 0) {
                 yield { type: "step", content: `Found ${routeResult.sources.length} relevant legal references.` };
                 contextParts.push((0, query_router_1.buildContext)(routeResult.sources));
             }
-            // Add Perplexity results (always search for comprehensive answers)
             if (perplexityResults) {
                 yield { type: "step", content: "Enriching with online legal sources..." };
                 contextParts.push(`[Online Legal Sources]:\n${perplexityResults}`);
             }
-            // Emit sources
             yield { type: "citation", sources: allSources };
-            // Build combined context
-            let contextString = "";
-            if (contextParts.length > 0) {
-                contextString = contextParts.join("\n\n---\n\n");
+            let contextString = contextParts.length > 0 ? contextParts.join("\n\n---\n\n") : "";
+            // ═══════════════════════════════════════════════════════════
+            // DOCUMENT GENERATION PATH
+            // ═══════════════════════════════════════════════════════════
+            // Check current query AND history for document requests
+            const isDocRequestNow = isDocumentRequest(userQuery);
+            const wasDocRequestInHistory = history.some(m => isDocumentRequest(m.content || ""));
+            const isDocRequest = isDocRequestNow || wasDocRequestInHistory;
+            const hasEnoughInfo = hasEnoughContractInfo(userQuery, history);
+            console.log("Is document request (now):", isDocRequestNow, "Was in history:", wasDocRequestInHistory, "Has enough info:", hasEnoughInfo);
+            if (isDocRequest && hasEnoughInfo && userId) {
+                yield { type: "step", content: "Generating your PDF contract..." };
+                // Build conversation context for the AI to extract details
+                const conversationContext = history.map(m => `${m.role}: ${m.content}`).join("\n");
+                try {
+                    // Use function calling with FORCED tool choice
+                    const response = await client.chat.completions.create({
+                        model: "google/gemini-3-flash-preview",
+                        messages: [
+                            { role: "system", content: DOC_GEN_SYSTEM_PROMPT + personalizationContext },
+                            { role: "user", content: `Previous conversation:\n${conversationContext}\n\nLatest request: ${userQuery}\n\nGenerate the contract now.` }
+                        ],
+                        tools: [CONTRACT_TOOL],
+                        tool_choice: { type: "function", function: { name: "generate_contract" } },
+                    });
+                    const message = response.choices[0]?.message;
+                    console.log("Tool response:", JSON.stringify(message, null, 2));
+                    if (message?.tool_calls && message.tool_calls.length > 0) {
+                        const toolCall = message.tool_calls[0];
+                        const args = JSON.parse(toolCall.function.arguments);
+                        // Force correct language based on user's language
+                        args.language = userLang;
+                        // Simple contract data - AI generates the content
+                        const contractData = {
+                            type: args.type || "rental",
+                            title: args.title,
+                            language: args.language,
+                            content: args.content, // The full contract text from AI
+                        };
+                        const document = await (0, contract_generator_1.generateContract)(userId, contractData);
+                        yield { type: "contract_generated", document };
+                        // Confirmation message in user's language - NO EMOJIS
+                        const messages = {
+                            en: `**Contract Generated Successfully**\n\n**${document.title}**\n\nYour contract has been generated as a professional PDF document. Click the download button below to save it.\n\n**Important**: Have signatures legalized at your local commune (Moqata'a) and register the contract with tax authorities for full legal protection.`,
+                            fr: `**Contrat Généré avec Succès**\n\n**${document.title}**\n\nVotre contrat a été généré en format PDF professionnel. Cliquez sur le bouton ci-dessous pour le télécharger.\n\n**Important**: Faites légaliser les signatures auprès de votre commune et enregistrez le contrat aux impôts pour une protection juridique complète.`,
+                            ar: `**تم إنشاء العقد بنجاح**\n\n**${document.title}**\n\nتم إنشاء عقدك بصيغة PDF احترافية. انقر على زر التحميل أدناه لحفظه.\n\n**مهم**: قم بتصحيح الإمضاءات في الجماعة وسجل العقد لدى إدارة الضرائب لضمان الحماية القانونية الكاملة.`
+                        };
+                        yield { type: "token", content: messages[userLang] };
+                    }
+                    else {
+                        // Fallback if tool wasn't called
+                        console.error("Tool was not called, message:", message?.content);
+                        yield { type: "token", content: "I couldn't generate the PDF. Please provide all required details (names, addresses, amounts) and try again." };
+                    }
+                }
+                catch (error) {
+                    console.error("Contract generation error:", error);
+                    yield { type: "token", content: "Error generating contract. Please try again." };
+                }
             }
-            yield { type: "step", content: "Formulating legal advice..." };
-            const userContent = contextString
-                ? `Context:\n${contextString}\n\n---\n\nQuestion: ${userQuery}`
-                : `Question: ${userQuery}\n\n(No specific documents found. Provide general guidance based on Moroccan law principles.)`;
-            const stream = await client.chat.completions.create({
-                model: "google/gemini-3-flash-preview",
-                messages: [
-                    { role: "system", content: SYSTEM_PROMPT },
-                    ...history.slice(-6).map((m) => ({ role: m.role, content: m.content })),
-                    { role: "user", content: buildUserContent(userContent) }
-                ],
-                stream: true,
-            });
-            for await (const chunk of stream) {
-                const content = chunk.choices[0]?.delta?.content || "";
-                if (content)
-                    yield { type: "token", content };
+            else {
+                // ═══════════════════════════════════════════════════════════
+                // REGULAR RESPONSE PATH
+                // ═══════════════════════════════════════════════════════════
+                yield { type: "step", content: "Formulating response..." };
+                const userContent = contextString
+                    ? `Context:\n${contextString}\n\n---\n\nQuestion: ${userQuery}`
+                    : `Question: ${userQuery}`;
+                const stream = await client.chat.completions.create({
+                    model: "google/gemini-3-flash-preview",
+                    messages: [
+                        { role: "system", content: SYSTEM_PROMPT + personalizationContext },
+                        ...history.slice(-6).map((m) => ({ role: m.role, content: m.content })),
+                        { role: "user", content: buildUserContent(userContent) }
+                    ],
+                    stream: true,
+                });
+                for await (const chunk of stream) {
+                    const content = chunk.choices[0]?.delta?.content || "";
+                    if (content)
+                        yield { type: "token", content };
+                }
             }
         }
         yield { type: "done" };

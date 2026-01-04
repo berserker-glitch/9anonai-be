@@ -27,6 +27,14 @@ app.use((0, cors_1.default)({
 }));
 app.use(express_1.default.json({ limit: "50mb" }));
 app.use(express_1.default.urlencoded({ limit: "50mb", extended: true }));
+// Request logging middleware
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    if (req.method === 'PATCH' || req.method === 'POST' || req.method === 'PUT') {
+        console.log('  Body:', JSON.stringify(req.body).substring(0, 200));
+    }
+    next();
+});
 // Static file serving for uploads
 app.use("/uploads", express_1.default.static(path_1.default.join(__dirname, "../uploads")));
 // Routes

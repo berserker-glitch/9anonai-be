@@ -3,12 +3,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.generateFlexiblePDF = generateFlexiblePDF;
 exports.generateContract = generateContract;
 exports.getContractTypes = getContractTypes;
-const pdfkit_1 = __importDefault(require("pdfkit"));
+const puppeteer_1 = __importDefault(require("puppeteer"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
-// Ensure uploads directory exists
+const prisma_1 = require("./prisma");
 const GENERATED_PDFS_DIR = path_1.default.join(__dirname, "../../uploads/pdfs-generated");
 function ensureDirectoryExists(userId) {
     const userDir = path_1.default.join(GENERATED_PDFS_DIR, userId);
@@ -17,501 +18,330 @@ function ensureDirectoryExists(userId) {
     }
     return userDir;
 }
-function formatDate(date) {
-    if (date)
-        return date;
-    const now = new Date();
-    return `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`;
+/**
+ * Detect if text contains Arabic characters
+ */
+function containsArabic(text) {
+    return /[\u0600-\u06FF]/.test(text);
 }
 /**
- * Generate Employment Contract
+ * Convert markdown-like content to HTML
  */
-function generateEmploymentContract(doc, data) {
-    const employer = data.parties[0];
-    const employee = data.parties[1];
-    const lang = data.language || "fr";
-    // Title
-    doc.fontSize(18).font('Helvetica-Bold');
-    if (lang === "fr") {
-        doc.text("CONTRAT DE TRAVAIL", { align: "center" });
-    }
-    else if (lang === "en") {
-        doc.text("EMPLOYMENT CONTRACT", { align: "center" });
-    }
-    else {
-        // Arabic - align right for RTL languages
-        doc.text("عقد العمل", { align: "right" });
-    }
-    doc.moveDown(2);
-    // Header info
-    doc.fontSize(11).font('Helvetica');
-    const headerText = lang === "fr"
-        ? `Fait à ${data.place || "________"}, le ${formatDate(data.date)}`
-        : lang === "en"
-            ? `Done at ${data.place || "________"}, on ${formatDate(data.date)}`
-            : `حرر ب${data.place || "________"}، بتاريخ ${formatDate(data.date)}`;
-    doc.text(headerText);
-    doc.moveDown(2);
-    // Parties section
-    doc.fontSize(12).font('Helvetica-Bold');
-    doc.text(lang === "fr" ? "ENTRE LES SOUSSIGNÉS:" : lang === "en" ? "BETWEEN THE UNDERSIGNED:" : "بين الموقعين أدناه:");
-    doc.moveDown();
-    doc.fontSize(11).font('Helvetica');
-    if (lang === "fr") {
-        doc.text(`L'EMPLOYEUR: ${employer.name || "________"}`);
-        doc.text(`CIN: ${employer.cin || "________"}`);
-        doc.text(`Adresse: ${employer.address || "________"}`);
-        doc.moveDown();
-        doc.text(`L'EMPLOYÉ(E): ${employee?.name || "________"}`);
-        doc.text(`CIN: ${employee?.cin || "________"}`);
-        doc.text(`Adresse: ${employee?.address || "________"}`);
-    }
-    else if (lang === "en") {
-        doc.text(`EMPLOYER: ${employer.name || "________"}`);
-        doc.text(`ID Number: ${employer.cin || "________"}`);
-        doc.text(`Address: ${employer.address || "________"}`);
-        doc.moveDown();
-        doc.text(`EMPLOYEE: ${employee?.name || "________"}`);
-        doc.text(`ID Number: ${employee?.cin || "________"}`);
-        doc.text(`Address: ${employee?.address || "________"}`);
-    }
-    doc.moveDown(2);
-    // Agreement statement
-    doc.text(lang === "fr"
-        ? "IL A ÉTÉ CONVENU ET ARRÊTÉ CE QUI SUIT:"
-        : "IT HAS BEEN AGREED AS FOLLOWS:");
-    doc.moveDown(2);
-    // Articles
-    const articles = [
-        {
-            title: lang === "fr" ? "ARTICLE 1 - ENGAGEMENT" : "ARTICLE 1 - EMPLOYMENT",
-            content: lang === "fr"
-                ? `L'employeur engage le salarié en qualité de ${data.position || "________"}.`
-                : `The employer hires the employee as ${data.position || "________"}.`
-        },
-        {
-            title: lang === "fr" ? "ARTICLE 2 - DURÉE DU CONTRAT" : "ARTICLE 2 - CONTRACT DURATION",
-            content: lang === "fr"
-                ? `Le présent contrat est conclu pour une durée ${data.duration || "indéterminée"}, prenant effet à compter du ${data.startDate || "________"}.`
-                : `This contract is concluded for a duration of ${data.duration || "indefinite"}, effective from ${data.startDate || "________"}.`
-        },
-        {
-            title: lang === "fr" ? "ARTICLE 3 - RÉMUNÉRATION" : "ARTICLE 3 - REMUNERATION",
-            content: lang === "fr"
-                ? `En contrepartie de ses services, le salarié percevra une rémunération mensuelle brute de ${data.salary || "________"} MAD.`
-                : `In consideration for their services, the employee shall receive a gross monthly salary of ${data.salary || "________"} MAD.`
-        },
-        {
-            title: lang === "fr" ? "ARTICLE 4 - PÉRIODE D'ESSAI" : "ARTICLE 4 - PROBATION PERIOD",
-            content: lang === "fr"
-                ? "Conformément au Code du travail marocain, le présent contrat est soumis à une période d'essai de trois mois, renouvelable une fois."
-                : "In accordance with the Moroccan Labor Code, this contract is subject to a three-month probation period, renewable once."
-        },
-        {
-            title: lang === "fr" ? "ARTICLE 5 - LIEU DE TRAVAIL" : "ARTICLE 5 - PLACE OF WORK",
-            content: lang === "fr"
-                ? `Le salarié exercera ses fonctions à ${employer.address || "________"}.`
-                : `The employee shall perform their duties at ${employer.address || "________"}.`
-        },
-        {
-            title: lang === "fr" ? "ARTICLE 6 - HORAIRES DE TRAVAIL" : "ARTICLE 6 - WORKING HOURS",
-            content: lang === "fr"
-                ? "Le salarié est soumis à la durée légale du travail fixée à 44 heures par semaine, conformément à l'article 184 du Code du travail."
-                : "The employee is subject to the legal working hours of 44 hours per week, in accordance with Article 184 of the Labor Code."
-        },
-        {
-            title: lang === "fr" ? "ARTICLE 7 - CONGÉS PAYÉS" : "ARTICLE 7 - PAID LEAVE",
-            content: lang === "fr"
-                ? "Le salarié bénéficie d'un congé annuel payé conformément aux dispositions du Code du travail (1,5 jour ouvrable par mois de service)."
-                : "The employee is entitled to annual paid leave in accordance with the Labor Code provisions (1.5 working days per month of service)."
-        },
-        {
-            title: lang === "fr" ? "ARTICLE 8 - OBLIGATIONS DU SALARIÉ" : "ARTICLE 8 - EMPLOYEE OBLIGATIONS",
-            content: lang === "fr"
-                ? "Le salarié s'engage à exécuter de bonne foi les tâches qui lui sont confiées, à respecter le règlement intérieur et à préserver la confidentialité des informations de l'entreprise."
-                : "The employee undertakes to perform their assigned tasks in good faith, comply with internal regulations, and maintain confidentiality of company information."
-        },
-        {
-            title: lang === "fr" ? "ARTICLE 9 - RÉSILIATION" : "ARTICLE 9 - TERMINATION",
-            content: lang === "fr"
-                ? "Le présent contrat peut être résilié par l'une ou l'autre des parties dans le respect des délais de préavis prévus par le Code du travail."
-                : "This contract may be terminated by either party in compliance with the notice periods provided by the Labor Code."
-        },
-        {
-            title: lang === "fr" ? "ARTICLE 10 - LITIGES" : "ARTICLE 10 - DISPUTES",
-            content: lang === "fr"
-                ? "Tout litige relatif à l'exécution du présent contrat sera soumis aux juridictions compétentes du lieu de travail."
-                : "Any dispute relating to the performance of this contract shall be submitted to the competent courts of the place of work."
+function contentToHtml(content) {
+    const lines = content.split('\n');
+    let html = '';
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            html += '<br/>';
+            continue;
         }
-    ];
-    articles.forEach((article, index) => {
-        doc.fontSize(11).font('Helvetica-Bold');
-        doc.text(article.title);
-        doc.font('Helvetica');
-        doc.text(article.content);
-        doc.moveDown();
-    });
-    // Additional clauses
-    if (data.additionalClauses && data.additionalClauses.length > 0) {
-        doc.moveDown();
-        doc.fontSize(11).font('Helvetica-Bold');
-        doc.text(lang === "fr" ? "CLAUSES ADDITIONNELLES:" : "ADDITIONAL CLAUSES:");
-        doc.font('Helvetica');
-        data.additionalClauses.forEach((clause, i) => {
-            doc.text(`${i + 1}. ${clause}`);
-        });
+        // Headers
+        if (trimmed.startsWith('### ')) {
+            html += `<h3>${trimmed.replace('### ', '')}</h3>`;
+        }
+        else if (trimmed.startsWith('## ')) {
+            html += `<h2>${trimmed.replace('## ', '')}</h2>`;
+        }
+        else if (trimmed.startsWith('# ')) {
+            html += `<h1>${trimmed.replace('# ', '')}</h1>`;
+        }
+        // Bold (full line)
+        else if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
+            html += `<p><strong>${trimmed.replace(/\*\*/g, '')}</strong></p>`;
+        }
+        // Bullet points
+        else if (trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
+            html += `<p style="padding-right: 20px;">• ${trimmed.substring(2)}</p>`;
+        }
+        // Numbered lists
+        else if (/^\d+\.\s/.test(trimmed)) {
+            html += `<p style="padding-right: 20px;">${trimmed}</p>`;
+        }
+        // Article headers
+        else if (/^Article\s+\d+|^ARTICLE\s+\d+|^المادة|^الفصل|^البند/i.test(trimmed)) {
+            html += `<h3 style="margin-top: 20px;">${trimmed}</h3>`;
+        }
+        // Regular paragraph with inline bold
+        else {
+            const withBold = trimmed.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            html += `<p>${withBold}</p>`;
+        }
     }
-    // Signatures
-    doc.moveDown(3);
-    const sigTitle = lang === "fr" ? "SIGNATURES:" : "SIGNATURES:";
-    doc.fontSize(12).font('Helvetica-Bold').text(sigTitle);
-    doc.moveDown(2);
-    doc.fontSize(11).font('Helvetica');
-    const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-    const halfWidth = pageWidth / 2;
-    const y = doc.y;
-    doc.text(lang === "fr" ? "L'Employeur:" : "Employer:", doc.page.margins.left, y);
-    doc.text(lang === "fr" ? "L'Employé(e):" : "Employee:", doc.page.margins.left + halfWidth, y);
-    doc.moveDown(3);
-    const signY = doc.y;
-    doc.text("_______________________", doc.page.margins.left, signY);
-    doc.text("_______________________", doc.page.margins.left + halfWidth, signY);
-    doc.moveDown();
-    doc.text(`${employer.name || ""}`, doc.page.margins.left, doc.y);
-    doc.text(`${employee?.name || ""}`, doc.page.margins.left + halfWidth, doc.y - 14);
+    return html;
 }
 /**
- * Generate Rental/Lease Contract
+ * Generate HTML template for A4 PDF
  */
-function generateRentalContract(doc, data) {
-    const landlord = data.parties[0];
-    const tenant = data.parties[1];
-    const lang = data.language || "fr";
-    doc.fontSize(18).font('Helvetica-Bold');
-    doc.text(lang === "fr" ? "CONTRAT DE BAIL" : "LEASE AGREEMENT", { align: "center" });
-    doc.moveDown(2);
-    doc.fontSize(11).font('Helvetica');
-    doc.text(`Fait à ${data.place || "________"}, le ${formatDate(data.date)}`);
-    doc.moveDown(2);
-    // Parties
-    doc.fontSize(12).font('Helvetica-Bold');
-    doc.text("ENTRE LES SOUSSIGNÉS:");
-    doc.moveDown();
-    doc.fontSize(11).font('Helvetica');
-    doc.text(`LE BAILLEUR: ${landlord.name || "________"}`);
-    doc.text(`CIN: ${landlord.cin || "________"}`);
-    doc.text(`Adresse: ${landlord.address || "________"}`);
-    doc.moveDown();
-    doc.text(`LE LOCATAIRE: ${tenant?.name || "________"}`);
-    doc.text(`CIN: ${tenant?.cin || "________"}`);
-    doc.text(`Adresse: ${tenant?.address || "________"}`);
-    doc.moveDown(2);
-    doc.text("IL A ÉTÉ CONVENU ET ARRÊTÉ CE QUI SUIT:");
-    doc.moveDown(2);
-    const articles = [
-        {
-            title: "ARTICLE 1 - OBJET DU CONTRAT",
-            content: `Le bailleur donne en location au locataire le bien immobilier situé à:\n${data.propertyAddress || "________"}`
-        },
-        {
-            title: "ARTICLE 2 - DURÉE",
-            content: `Le présent bail est consenti pour une durée de ${data.rentPeriod || "un an"}, prenant effet à compter du ${data.startDate || "________"}.`
-        },
-        {
-            title: "ARTICLE 3 - LOYER",
-            content: `Le loyer mensuel est fixé à ${data.rentAmount || "________"} MAD, payable au plus tard le 5 de chaque mois.`
-        },
-        {
-            title: "ARTICLE 4 - DÉPÔT DE GARANTIE",
-            content: `Le locataire verse ce jour au bailleur la somme de ${data.deposit || "________"} MAD à titre de dépôt de garantie.`
-        },
-        {
-            title: "ARTICLE 5 - CHARGES",
-            content: "Les charges locatives (eau, électricité, syndic) sont à la charge du locataire."
-        },
-        {
-            title: "ARTICLE 6 - DESTINATION",
-            content: "Le local est destiné exclusivement à l'usage d'habitation. Toute modification d'usage nécessite l'accord écrit du bailleur."
-        },
-        {
-            title: "ARTICLE 7 - ENTRETIEN",
-            content: "Le locataire s'engage à maintenir les lieux en bon état d'entretien et à effectuer les réparations locatives à sa charge."
-        },
-        {
-            title: "ARTICLE 8 - RÉSILIATION",
-            content: "Chaque partie peut résilier le contrat moyennant un préavis de trois mois, notifié par lettre recommandée."
-        },
-        {
-            title: "ARTICLE 9 - ÉTAT DES LIEUX",
-            content: "Un état des lieux contradictoire sera établi à l'entrée et à la sortie du locataire."
-        },
-        {
-            title: "ARTICLE 10 - LOI APPLICABLE",
-            content: "Le présent contrat est soumis à la loi n° 67-12 relative aux baux d'habitation ou à usage professionnel."
+function generateHtmlTemplate(title, content, language, timestamp) {
+    const isRTL = language === 'ar' || containsArabic(content);
+    const direction = isRTL ? 'rtl' : 'ltr';
+    const textAlign = isRTL ? 'right' : 'left';
+    const fontFamily = isRTL ? "'Amiri', 'Traditional Arabic', 'Arial', serif" : "'Times New Roman', serif";
+    const contentHtml = contentToHtml(content);
+    return `
+<!DOCTYPE html>
+<html lang="${language}" dir="${direction}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&display=swap" rel="stylesheet">
+    <title>${title}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 20mm;
         }
-    ];
-    articles.forEach(article => {
-        doc.fontSize(11).font('Helvetica-Bold');
-        doc.text(article.title);
-        doc.font('Helvetica');
-        doc.text(article.content);
-        doc.moveDown();
-    });
-    // Signatures
-    doc.moveDown(2);
-    doc.fontSize(12).font('Helvetica-Bold').text("SIGNATURES:");
-    doc.moveDown(2);
-    doc.fontSize(11).font('Helvetica');
-    const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-    const halfWidth = pageWidth / 2;
-    const y = doc.y;
-    doc.text("Le Bailleur:", doc.page.margins.left, y);
-    doc.text("Le Locataire:", doc.page.margins.left + halfWidth, y);
-    doc.moveDown(3);
-    const signY = doc.y;
-    doc.text("_______________________", doc.page.margins.left, signY);
-    doc.text("_______________________", doc.page.margins.left + halfWidth, signY);
-}
-/**
- * Generate NDA Contract
- */
-function generateNDAContract(doc, data) {
-    const disclosingParty = data.parties[0];
-    const receivingParty = data.parties[1];
-    const lang = data.language || "fr";
-    doc.fontSize(18).font('Helvetica-Bold');
-    doc.text(lang === "fr" ? "ACCORD DE CONFIDENTIALITÉ" : "NON-DISCLOSURE AGREEMENT", { align: "center" });
-    doc.moveDown(2);
-    doc.fontSize(11).font('Helvetica');
-    doc.text(`Fait à ${data.place || "________"}, le ${formatDate(data.date)}`);
-    doc.moveDown(2);
-    // Parties
-    doc.fontSize(12).font('Helvetica-Bold');
-    doc.text("ENTRE:");
-    doc.moveDown();
-    doc.fontSize(11).font('Helvetica');
-    doc.text(`PARTIE DIVULGATRICE: ${disclosingParty.name || "________"}`);
-    doc.text(`Adresse: ${disclosingParty.address || "________"}`);
-    doc.moveDown();
-    doc.text(`PARTIE RÉCEPTRICE: ${receivingParty?.name || "________"}`);
-    doc.text(`Adresse: ${receivingParty?.address || "________"}`);
-    doc.moveDown(2);
-    const articles = [
-        {
-            title: "ARTICLE 1 - OBJET",
-            content: "Le présent accord a pour objet de définir les conditions de confidentialité applicables aux informations communiquées entre les parties."
-        },
-        {
-            title: "ARTICLE 2 - INFORMATIONS CONFIDENTIELLES",
-            content: `Sont considérées comme confidentielles:\n${data.confidentialInfo || "- Toutes informations techniques, commerciales, financières ou stratégiques\n- Tous documents, données, savoir-faire, procédés\n- Toutes informations orales ou écrites identifiées comme confidentielles"}`
-        },
-        {
-            title: "ARTICLE 3 - OBLIGATIONS",
-            content: "La partie réceptrice s'engage à:\n- Ne pas divulguer les informations confidentielles à des tiers\n- Ne les utiliser qu'aux fins expressément autorisées\n- Prendre toutes mesures pour préserver leur confidentialité"
-        },
-        {
-            title: "ARTICLE 4 - DURÉE",
-            content: `Les obligations de confidentialité restent en vigueur pendant ${data.ndaDuration || "cinq (5) ans"} à compter de la signature du présent accord.`
-        },
-        {
-            title: "ARTICLE 5 - EXCLUSIONS",
-            content: "Ne sont pas considérées comme confidentielles les informations:\n- Déjà connues du public\n- Développées indépendamment par la partie réceptrice\n- Communiquées par un tiers autorisé"
-        },
-        {
-            title: "ARTICLE 6 - SANCTIONS",
-            content: "Toute violation des présentes obligations pourra donner lieu à des poursuites judiciaires et au versement de dommages et intérêts."
-        },
-        {
-            title: "ARTICLE 7 - LOI APPLICABLE",
-            content: "Le présent accord est régi par le droit marocain. Tout litige sera soumis aux tribunaux compétents."
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-    ];
-    articles.forEach(article => {
-        doc.fontSize(11).font('Helvetica-Bold');
-        doc.text(article.title);
-        doc.font('Helvetica');
-        doc.text(article.content);
-        doc.moveDown();
-    });
-    // Signatures
-    doc.moveDown(2);
-    doc.fontSize(12).font('Helvetica-Bold').text("SIGNATURES:");
-    doc.moveDown(2);
-    doc.fontSize(11).font('Helvetica');
-    const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-    const halfWidth = pageWidth / 2;
-    const y = doc.y;
-    doc.text("Partie Divulgatrice:", doc.page.margins.left, y);
-    doc.text("Partie Réceptrice:", doc.page.margins.left + halfWidth, y);
-    doc.moveDown(3);
-    const signY = doc.y;
-    doc.text("_______________________", doc.page.margins.left, signY);
-    doc.text("_______________________", doc.page.margins.left + halfWidth, signY);
-}
-/**
- * Generate Service Agreement
- */
-function generateServiceContract(doc, data) {
-    const client = data.parties[0];
-    const provider = data.parties[1];
-    doc.fontSize(18).font('Helvetica-Bold');
-    doc.text("CONTRAT DE PRESTATION DE SERVICES", { align: "center" });
-    doc.moveDown(2);
-    doc.fontSize(11).font('Helvetica');
-    doc.text(`Fait à ${data.place || "________"}, le ${formatDate(data.date)}`);
-    doc.moveDown(2);
-    // Parties
-    doc.fontSize(12).font('Helvetica-Bold');
-    doc.text("ENTRE LES SOUSSIGNÉS:");
-    doc.moveDown();
-    doc.fontSize(11).font('Helvetica');
-    doc.text(`LE CLIENT: ${client.name || "________"}`);
-    doc.text(`Adresse: ${client.address || "________"}`);
-    doc.moveDown();
-    doc.text(`LE PRESTATAIRE: ${provider?.name || "________"}`);
-    doc.text(`Adresse: ${provider?.address || "________"}`);
-    doc.moveDown(2);
-    const articles = [
-        {
-            title: "ARTICLE 1 - OBJET",
-            content: `Le prestataire s'engage à fournir les services suivants:\n${data.serviceDescription || "________"}`
-        },
-        {
-            title: "ARTICLE 2 - DURÉE",
-            content: `Le présent contrat prend effet le ${data.startDate || "________"} pour une durée de ${data.duration || "________"}.`
-        },
-        {
-            title: "ARTICLE 3 - LIVRABLES",
-            content: `Les livrables attendus sont:\n${data.deliverables || "________"}`
-        },
-        {
-            title: "ARTICLE 4 - RÉMUNÉRATION",
-            content: `Le prestataire percevra une rémunération de ${data.salary || "________"} MAD.\nConditions de paiement: ${data.paymentTerms || "À la livraison"}`
-        },
-        {
-            title: "ARTICLE 5 - OBLIGATIONS DU PRESTATAIRE",
-            content: "Le prestataire s'engage à:\n- Exécuter les services avec diligence et professionnalisme\n- Respecter les délais convenus\n- Informer le client de tout obstacle à l'exécution"
-        },
-        {
-            title: "ARTICLE 6 - OBLIGATIONS DU CLIENT",
-            content: "Le client s'engage à:\n- Fournir toutes informations nécessaires à l'exécution\n- Procéder au paiement dans les délais convenus"
-        },
-        {
-            title: "ARTICLE 7 - CONFIDENTIALITÉ",
-            content: "Chaque partie s'engage à préserver la confidentialité des informations échangées."
-        },
-        {
-            title: "ARTICLE 8 - RÉSILIATION",
-            content: "Le contrat peut être résilié par l'une ou l'autre des parties moyennant un préavis de 30 jours."
+        
+        body {
+            font-family: ${fontFamily};
+            font-size: 12pt;
+            line-height: 1.6;
+            direction: ${direction};
+            text-align: ${textAlign};
+            color: #333;
+            padding: 0;
         }
-    ];
-    articles.forEach(article => {
-        doc.fontSize(11).font('Helvetica-Bold');
-        doc.text(article.title);
-        doc.font('Helvetica');
-        doc.text(article.content);
-        doc.moveDown();
-    });
-    // Signatures
-    doc.moveDown(2);
-    doc.fontSize(12).font('Helvetica-Bold').text("SIGNATURES:");
-    doc.moveDown(2);
-    doc.fontSize(11).font('Helvetica');
-    const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-    const halfWidth = pageWidth / 2;
-    const y = doc.y;
-    doc.text("Le Client:", doc.page.margins.left, y);
-    doc.text("Le Prestataire:", doc.page.margins.left + halfWidth, y);
-    doc.moveDown(3);
-    const signY = doc.y;
-    doc.text("_______________________", doc.page.margins.left, signY);
-    doc.text("_______________________", doc.page.margins.left + halfWidth, signY);
+        
+        .header {
+            text-align: ${isRTL ? 'left' : 'right'};
+            font-size: 9pt;
+            color: #666;
+            margin-bottom: 30px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+        }
+        
+        .title {
+            text-align: center;
+            font-size: 18pt;
+            font-weight: bold;
+            margin-bottom: 30px;
+            color: #1a1a1a;
+        }
+        
+        .content {
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            font-size: 16pt;
+            text-align: center;
+            margin: 20px 0 15px;
+            color: #1a1a1a;
+        }
+        
+        h2 {
+            font-size: 14pt;
+            margin: 18px 0 12px;
+            color: #2a2a2a;
+        }
+        
+        h3 {
+            font-size: 12pt;
+            margin: 15px 0 10px;
+            color: #3a3a3a;
+        }
+        
+        p {
+            margin: 8px 0;
+            text-align: justify;
+        }
+        
+        strong {
+            font-weight: bold;
+        }
+        
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            font-size: 9pt;
+            color: #666;
+            text-align: center;
+        }
+        
+        .signatures {
+            margin-top: 50px;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .signature-block {
+            text-align: center;
+            width: 45%;
+        }
+        
+        .signature-line {
+            border-top: 1px solid #333;
+            margin-top: 50px;
+            padding-top: 10px;
+        }
+        
+        .legal-notice {
+            margin-top: 30px;
+            padding: 15px;
+            background: #f9f9f9;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 10pt;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>9anon - Moroccan Legal AI</div>
+        <div>Document ID: ${timestamp}</div>
+    </div>
+    
+    <div class="title">${title}</div>
+    
+    <div class="content">
+        ${contentHtml}
+    </div>
+    
+    <div class="footer">
+        <div class="legal-notice">
+            <strong>${isRTL ? 'ملاحظة قانونية:' : 'Legal Notice:'}</strong><br/>
+            ${isRTL
+        ? '1. يجب تصحيح الإمضاءات لدى السلطات المحلية (المقاطعة)<br/>2. يجب تسجيل العقد لدى إدارة الضرائب خلال 30 يوماً'
+        : '1. Legalize signatures at local authorities (Moqata\'a)<br/>2. Register with Tax Administration within 30 days'}
+        </div>
+        <br/>
+        <div>Generated by 9anon - Moroccan Legal AI Assistant</div>
+        <div>This document should be reviewed by a legal professional before signing.</div>
+    </div>
+</body>
+</html>`;
 }
 /**
- * Main function to generate PDF contract
+ * Generate PDF using Puppeteer (HTML to PDF)
+ * Properly handles Arabic, French, and English
  */
-async function generateContract(userId, data) {
+async function generateFlexiblePDF(userId, title, content, type = "document", language = "en") {
     const userDir = ensureDirectoryExists(userId);
     const timestamp = Date.now();
-    const filename = `${data.type}_${timestamp}.pdf`;
+    const filename = `${type}_${timestamp}.pdf`;
     const filepath = path_1.default.join(userDir, filename);
-    // Title map
-    const titleMap = {
-        employment: "Contrat de Travail",
-        rental: "Contrat de Bail",
-        service: "Contrat de Prestation",
-        nda: "Accord de Confidentialité",
-        sales: "Contrat de Vente",
-        power_of_attorney: "Procuration",
-        demand_letter: "Mise en Demeure"
-    };
-    return new Promise((resolve, reject) => {
-        const doc = new pdfkit_1.default({
-            size: 'A4',
-            margins: { top: 50, bottom: 50, left: 60, right: 60 },
-            info: {
-                Title: titleMap[data.type] || "Legal Document",
-                Author: "9anon - Moroccan Legal AI",
-                Subject: `${data.type} contract`,
-                Creator: "9anon Legal Document Generator"
+    console.log(`Generating PDF with Puppeteer: language=${language}, type=${type}`);
+    // Generate HTML
+    const html = generateHtmlTemplate(title, content, language, timestamp);
+    // Launch Puppeteer and generate PDF
+    const browser = await puppeteer_1.default.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    try {
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+        // Generate A4 PDF
+        await page.pdf({
+            path: filepath,
+            format: 'A4',
+            printBackground: true,
+            margin: {
+                top: '20mm',
+                right: '20mm',
+                bottom: '20mm',
+                left: '20mm'
             }
         });
-        const writeStream = fs_1.default.createWriteStream(filepath);
-        doc.pipe(writeStream);
-        // Header
-        doc.fontSize(9).font('Helvetica');
-        doc.text("9anon - Assistant Juridique Marocain", { align: "right" });
-        doc.moveDown(2);
-        // Generate based on type
-        switch (data.type) {
-            case "employment":
-                generateEmploymentContract(doc, data);
-                break;
-            case "rental":
-                generateRentalContract(doc, data);
-                break;
-            case "nda":
-                generateNDAContract(doc, data);
-                break;
-            case "service":
-                generateServiceContract(doc, data);
-                break;
-            default:
-                // Generic document
-                doc.fontSize(16).font('Helvetica-Bold');
-                doc.text("DOCUMENT JURIDIQUE", { align: "center" });
-                doc.moveDown(2);
-                doc.fontSize(11).font('Helvetica');
-                doc.text("Ce document a été généré par 9anon.");
-        }
-        // Footer
-        doc.moveDown(3);
-        doc.fontSize(8).font('Helvetica');
-        doc.text("─".repeat(70));
-        doc.text("Document généré par 9anon - Assistant Juridique IA Marocain");
-        doc.text("Ce document est un modèle et doit être vérifié par un professionnel du droit avant signature.");
-        doc.end();
-        writeStream.on("finish", () => {
-            resolve({
-                id: `doc_${timestamp}`,
+        console.log(`PDF generated successfully: ${filepath}`);
+        // Save to Database
+        const doc = await prisma_1.prisma.generatedDocument.create({
+            data: {
+                type,
+                title,
                 filename,
-                path: `/uploads/pdfs-generated/${userId}/${filename}`,
-                type: data.type,
-                title: titleMap[data.type] || "Legal Document"
-            });
+                path: filepath, // OR relative path? FilesModal uses API to list.
+                // The API /download/:id uses filepath from DB to res.download.
+                // res.download checks fs.exists(document.path).
+                // So storing ABSOLUTE path is fine if backend runs on same machine.
+                // But usually relative is safer.
+                // However, pdf.ts code: `if (fs.existsSync(document.path))` implies absolute or relative to CWD.
+                // EnsureDirectoryExists returns absolute.
+                // So storing absolute path is consistent with current usage.
+                userId,
+                metadata: JSON.stringify({ language })
+            }
         });
-        writeStream.on("error", reject);
-    });
+        return {
+            id: doc.id,
+            filename: doc.filename,
+            path: doc.path,
+            type: doc.type,
+            title: doc.title
+        };
+    }
+    finally {
+        await browser.close();
+    }
 }
 /**
- * Get contract type titles for display
+ * Main contract generation function
  */
+async function generateContract(userId, data) {
+    const title = data.title || getDefaultTitle(data.type, data.language);
+    const lang = data.language || "en";
+    if (data.customContent || data.content) {
+        return generateFlexiblePDF(userId, title, data.customContent || data.content || "", data.type, lang);
+    }
+    const content = generateTemplateContent(data);
+    return generateFlexiblePDF(userId, title, content, data.type, lang);
+}
+function getDefaultTitle(type, lang) {
+    const titles = {
+        rental: { en: "RESIDENTIAL LEASE AGREEMENT", fr: "CONTRAT DE BAIL", ar: "عقد الكراء" },
+        employment: { en: "EMPLOYMENT CONTRACT", fr: "CONTRAT DE TRAVAIL", ar: "عقد العمل" },
+        service: { en: "SERVICE AGREEMENT", fr: "CONTRAT DE PRESTATION", ar: "عقد الخدمات" },
+        nda: { en: "NON-DISCLOSURE AGREEMENT", fr: "ACCORD DE CONFIDENTIALITE", ar: "اتفاقية السرية" },
+        sales: { en: "SALES CONTRACT", fr: "CONTRAT DE VENTE", ar: "عقد البيع" },
+        gift: { en: "GIFT AGREEMENT", fr: "CONTRAT DE DONATION", ar: "عقد الهبة" },
+        custom: { en: "LEGAL DOCUMENT", fr: "DOCUMENT JURIDIQUE", ar: "وثيقة قانونية" }
+    };
+    const l = lang || "en";
+    return titles[type]?.[l] || titles.custom[l];
+}
+function generateTemplateContent(data) {
+    const party1 = data.parties?.[0] || { name: "[PARTY 1 NAME]" };
+    const party2 = data.parties?.[1] || { name: "[PARTY 2 NAME]" };
+    const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    return `
+Done at ${data.place || "[CITY]"}, on ${today}
+
+BETWEEN:
+Party 1: ${party1.name || "[PARTY 1 NAME]"}
+CIN: ${party1.cin || "[CIN]"}
+Address: ${party1.address || "[ADDRESS]"}
+
+AND:
+Party 2: ${party2.name || "[PARTY 2 NAME]"}
+CIN: ${party2.cin || "[CIN]"}
+Address: ${party2.address || "[ADDRESS]"}
+
+THE PARTIES HAVE AGREED AS FOLLOWS:
+
+[Contract terms to be specified]
+
+SIGNATURES:
+
+Party 1: _______________                Party 2: _______________
+Date: ${today}                          Date: ${today}
+`;
+}
 function getContractTypes() {
     return [
-        { type: "employment", title: "Contrat de Travail", titleEn: "Employment Contract" },
-        { type: "rental", title: "Contrat de Bail", titleEn: "Lease Agreement" },
-        { type: "service", title: "Contrat de Prestation", titleEn: "Service Agreement" },
-        { type: "nda", title: "Accord de Confidentialité", titleEn: "Non-Disclosure Agreement" },
-        { type: "sales", title: "Contrat de Vente", titleEn: "Sales Contract" },
+        { type: "rental", title: "Lease Agreement" },
+        { type: "employment", title: "Employment Contract" },
+        { type: "service", title: "Service Agreement" },
+        { type: "nda", title: "Non-Disclosure Agreement" },
+        { type: "sales", title: "Sales Contract" },
+        { type: "gift", title: "Gift Agreement" },
     ];
 }

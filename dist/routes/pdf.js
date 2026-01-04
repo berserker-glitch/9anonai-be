@@ -5,7 +5,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const prisma_1 = require("../services/prisma");
 const contract_generator_1 = require("../services/contract-generator");
@@ -16,11 +15,17 @@ if (!JWT_SECRET) {
 }
 // Auth middleware
 const authenticate = (req, res, next) => {
+    let token;
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+        token = authHeader.split(" ")[1];
+    }
+    else if (req.query.token) {
+        token = req.query.token;
+    }
+    if (!token) {
         return res.status(401).json({ error: "No token provided" });
     }
-    const token = authHeader.split(" ")[1];
     try {
         const decoded = jsonwebtoken_1.default.verify(token, JWT_SECRET);
         req.userId = decoded.userId;
@@ -119,6 +124,30 @@ router.get("/:id", authenticate, async (req, res) => {
         res.status(500).json({ error: "Failed to get document" });
     }
 });
+// GET /api/pdf/download/:id - Download a generated document
+router.get("/download/:id", authenticate, async (req, res) => {
+    try {
+        const userId = req.userId;
+        const { id } = req.params;
+        const document = await prisma_1.prisma.generatedDocument.findUnique({
+            where: { id, userId }
+        });
+        if (!document) {
+            return res.status(404).json({ error: "Document not found" });
+        }
+        // The path stored in database is absolute, use it directly
+        const filepath = document.path;
+        if (!fs_1.default.existsSync(filepath)) {
+            console.error(`File not found at path: ${filepath}`);
+            return res.status(404).json({ error: "File not found on server" });
+        }
+        res.download(filepath, document.filename);
+    }
+    catch (error) {
+        console.error("Error downloading document:", error);
+        res.status(500).json({ error: "Failed to download document" });
+    }
+});
 // DELETE /api/pdf/:id - Delete a generated document
 router.delete("/:id", authenticate, async (req, res) => {
     try {
@@ -130,8 +159,8 @@ router.delete("/:id", authenticate, async (req, res) => {
         if (!document) {
             return res.status(404).json({ error: "Document not found" });
         }
-        // Delete from filesystem
-        const filepath = path_1.default.join(__dirname, "../../", document.path);
+        // Delete from filesystem - path in DB is absolute
+        const filepath = document.path;
         if (fs_1.default.existsSync(filepath)) {
             fs_1.default.unlinkSync(filepath);
         }

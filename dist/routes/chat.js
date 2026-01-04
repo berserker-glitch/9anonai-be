@@ -1,9 +1,14 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const zod_1 = require("zod");
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const lawyer_1 = require("../services/lawyer");
 const router = (0, express_1.Router)();
+const JWT_SECRET = process.env.JWT_SECRET;
 // Validation Schema
 const ChatSchema = zod_1.z.object({
     message: zod_1.z.string().min(1, "Message cannot be empty"),
@@ -13,15 +18,31 @@ const ChatSchema = zod_1.z.object({
         mimeType: zod_1.z.string(),
     })).optional(),
 });
-router.post("/", async (req, res) => {
+// Optional auth middleware - extracts userId if token present
+const optionalAuth = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ") && JWT_SECRET) {
+        const token = authHeader.split(" ")[1];
+        try {
+            const decoded = jsonwebtoken_1.default.verify(token, JWT_SECRET);
+            req.userId = decoded.userId;
+        }
+        catch (error) {
+            // Token invalid, continue without userId
+        }
+    }
+    next();
+};
+router.post("/", optionalAuth, async (req, res) => {
     // Set Headers for SSE
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     try {
         const { message, history, images } = ChatSchema.parse(req.body);
-        // Consume Stream
-        const stream = (0, lawyer_1.getLegalAdviceStream)(message, history || [], images || []);
+        const userId = req.userId;
+        // Consume Stream - pass userId for contract generation
+        const stream = (0, lawyer_1.getLegalAdviceStream)(message, history || [], images || [], userId);
         for await (const event of stream) {
             // Write event to stream
             res.write(`data: ${JSON.stringify(event)}\n\n`);
