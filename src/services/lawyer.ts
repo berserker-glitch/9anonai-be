@@ -15,37 +15,37 @@ const client = new OpenAI({
 });
 
 // Tool definition - now takes full content from AI
-const CONTRACT_TOOL = {
-    type: "function" as const,
-    function: {
-        name: "generate_contract",
-        description: "Generate a PDF document from the contract content you write.",
-        parameters: {
-            type: "object",
-            properties: {
-                type: {
-                    type: "string",
-                    enum: ["rental", "employment", "service", "nda", "sales", "custom"],
-                    description: "Type of contract"
-                },
-                title: {
-                    type: "string",
-                    description: "Document title"
-                },
-                language: {
-                    type: "string",
-                    enum: ["en", "fr", "ar"],
-                    description: "Document language"
-                },
-                content: {
-                    type: "string",
-                    description: "The FULL contract content you have written. Include all articles, clauses, party details, and terms."
-                }
-            },
-            required: ["type", "language", "content"]
-        }
-    }
-};
+// const CONTRACT_TOOL = {
+//     type: "function" as const,
+//     function: {
+//         name: "generate_contract",
+//         description: "Generate a PDF document from the contract content you write.",
+//         parameters: {
+//             type: "object",
+//             properties: {
+//                 type: {
+//                     type: "string",
+//                     enum: ["rental", "employment", "service", "nda", "sales", "custom"],
+//                     description: "Type of contract"
+//                 },
+//                 title: {
+//                     type: "string",
+//                     description: "Document title"
+//                 },
+//                 language: {
+//                     type: "string",
+//                     enum: ["en", "fr", "ar"],
+//                     description: "Document language"
+//                 },
+//                 content: {
+//                     type: "string",
+//                     description: "The FULL contract content you have written. Include all articles, clauses, party details, and terms."
+//                 }
+//             },
+//             required: ["type", "language", "content"]
+//         }
+//     }
+// };
 
 // Prompt for document generation - AI writes complete document (ANY type)
 const DOC_GEN_SYSTEM_PROMPT = `You are a Moroccan legal document writer. Write ANY type of legal document based on the user's request.
@@ -261,9 +261,10 @@ function isDocumentRequest(query: string): boolean {
     const arabicDocPattern = /عقد|وثيقة|اتفاقية|رسالة|شهادة|توكيل|صك|اعطني|اكتب|صياغة|انشاء|حرر/;
 
     // Return true if we have both document and action keywords, OR just document keyword with context
-    return (hasDocKeyword && hasActionKeyword) ||
-        (hasDocKeyword && lowerQuery.length < 100) || // Short request with doc keyword
-        arabicDocPattern.test(query);
+    // return (hasDocKeyword && hasActionKeyword) ||
+    //     (hasDocKeyword && lowerQuery.length < 100) || // Short request with doc keyword
+    //     arabicDocPattern.test(query);
+    return false; // DISABLED: Contract generation tool is temporarily disabled
 }
 
 
@@ -471,8 +472,8 @@ export async function* getLegalAdviceStream(
                             { role: "system", content: DOC_GEN_SYSTEM_PROMPT + personalizationContext },
                             { role: "user", content: `Previous conversation:\n${conversationContext}\n\nLatest request: ${userQuery}\n\nGenerate the contract now.` }
                         ],
-                        tools: [CONTRACT_TOOL],
-                        tool_choice: { type: "function", function: { name: "generate_contract" } },
+                        // tools: [CONTRACT_TOOL],
+                        // tool_choice: { type: "function", function: { name: "generate_contract" } },
                     });
 
                     const message = response.choices[0]?.message;
