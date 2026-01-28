@@ -311,6 +311,49 @@ function hasEnoughContractInfo(query: string, history: any[]): boolean {
     return nameCount >= 2 || (nameCount >= 1 && (hasAmounts || hasProperty || hasCIN));
 }
 
+/**
+ * Analyze query complexity to adjust response depth
+ */
+function analyzeComplexity(text: string): 'basic' | 'deep' {
+    const words = text.trim().split(/\s+/).length;
+
+    // Length heuristic: Long queries are usually complex scenarios
+    if (words > 15) return 'deep';
+
+    // Keyword heuristic: detailed scenarios
+    const deepKeywords = [
+        // English
+        "story", "situation", "happened", "problem", "issue", "case",
+        "accident", "died", "death", "killed", "murder",
+        "divorce", "married", "husband", "wife", "children", "custody",
+        "inheritance", "legacy", "heir",
+        "fired", "dismissed", "boss", "company", "work", "job",
+        "police", "arrested", "prison", "jail", "court",
+        "scam", "fraud", "money", "debt", "loan",
+        // French
+        "histoire", "situation", "problème", "cas",
+        "accident", "mort", "décès", "tué", "meurtre",
+        "divorce", "marié", "mari", "femme", "enfants", "garde",
+        "héritage", "succession", "héritier",
+        "licencié", "renvoyé", "patron", "entreprise", "travail", "boulot",
+        "police", "arrêté", "prison", "tribunal",
+        "arnaque", "fraude", "argent", "dette", "crédit",
+        // Arabic (Common keywords for stories/problems)
+        "مشكلة", "قصة", "حصل", "وقع", "حادثة",
+        "موت", "وفاة", "توفي", "قتل",
+        "طلاق", "زواج", "زوج", "زوجة", "أطفال", "حضانة",
+        "إرث", "ميراث", "ورثة",
+        "طرد", "فصل", "شغل", "عمل", "مدير",
+        "شرطة", "اعتقال", "سجن", "محكمة",
+        "نصب", "احتيال", "فلوس", "دين"
+    ];
+
+    const lowerText = text.toLowerCase();
+    if (deepKeywords.some(kw => lowerText.includes(kw))) return 'deep';
+
+    return 'basic';
+}
+
 export type ImageInput = { data: string; mimeType: string };
 
 export async function* getLegalAdviceStream(
@@ -375,6 +418,38 @@ export async function* getLegalAdviceStream(
                 console.warn("Failed to fetch personalization", e);
             }
         }
+
+        // Complexity Analysis & Instruction Injection
+        const complexity = analyzeComplexity(userQuery);
+        let complexityInstruction = "";
+
+        if (complexity === "deep") {
+            complexityInstruction = `
+            
+=== DYNAMIC RESPONSE MODE: DEEP DIVE ===
+The user's query is identified as COMPLEX.
+INSTRUCTIONS:
+1. Provide a DETAILED and COMPREHENSIVE analysis.
+2. Break down the answer into clear sections (Legal Framework, Application to Case, Recommendations).
+3. Address nuances and potential "what if" scenarios.
+4. Do NOT be brief. Be thorough and explanatory.
+========================================
+`;
+        } else {
+            complexityInstruction = `
+
+=== DYNAMIC RESPONSE MODE: CONCISE ===
+The user's query is identified as BASIC/INFORMATIONAL.
+INSTRUCTIONS:
+1. Provide a DIRECT and CONCISE answer.
+2. Cite the relevant article/law immediately.
+3. Keep it short and to the point. Avoid unnecessary preamble.
+======================================
+`;
+        }
+
+        // Append to personalization context (will be added to system prompt)
+        personalizationContext += complexityInstruction;
 
         // 1. Quick casual check
         let intent: Intent;
