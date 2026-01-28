@@ -287,13 +287,7 @@ async function generateFlexiblePDF(userId, title, content, type = "document", la
  * Main contract generation function
  */
 async function generateContract(userId, data) {
-    const title = data.title || getDefaultTitle(data.type, data.language);
-    const lang = data.language || "en";
-    if (data.customContent || data.content) {
-        return generateFlexiblePDF(userId, title, data.customContent || data.content || "", data.type, lang);
-    }
-    const content = generateTemplateContent(data);
-    return generateFlexiblePDF(userId, title, content, data.type, lang);
+    throw new Error("PDF generation is permanently disabled.");
 }
 function getDefaultTitle(type, lang) {
     const titles = {

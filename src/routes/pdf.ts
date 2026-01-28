@@ -42,48 +42,7 @@ router.get("/types", (req: Request, res: Response) => {
 
 // POST /api/pdf/generate - Generate a contract PDF
 router.post("/generate", authenticate, async (req: Request, res: Response) => {
-    try {
-        const userId = (req as any).userId;
-        const contractData: ContractData = req.body;
-
-        if (!contractData.type) {
-            return res.status(400).json({ error: "Contract type is required" });
-        }
-
-        if (!contractData.parties || contractData.parties.length < 2) {
-            return res.status(400).json({ error: "At least two parties are required" });
-        }
-
-        // Generate the PDF
-        const result = await generateContract(userId, contractData);
-
-        // Save to database
-        const savedDoc = await prisma.generatedDocument.create({
-            data: {
-                type: result.type,
-                title: result.title,
-                filename: result.filename,
-                path: result.path,
-                metadata: JSON.stringify(contractData),
-                userId,
-            }
-        });
-
-        res.status(201).json({
-            success: true,
-            document: {
-                id: savedDoc.id,
-                type: savedDoc.type,
-                title: savedDoc.title,
-                filename: savedDoc.filename,
-                downloadUrl: result.path,
-                createdAt: savedDoc.createdAt
-            }
-        });
-    } catch (error) {
-        console.error("PDF generation error:", error);
-        res.status(500).json({ error: "Failed to generate PDF" });
-    }
+    return res.status(403).json({ error: "PDF generation is disabled." });
 });
 
 // GET /api/pdf/list - List user's generated PDFs
@@ -137,30 +96,7 @@ router.get("/:id", authenticate, async (req: Request, res: Response) => {
 
 // GET /api/pdf/download/:id - Download a generated document
 router.get("/download/:id", authenticate, async (req: Request, res: Response) => {
-    try {
-        const userId = (req as any).userId;
-        const { id } = req.params;
-
-        const document = await prisma.generatedDocument.findUnique({
-            where: { id, userId }
-        });
-
-        if (!document) {
-            return res.status(404).json({ error: "Document not found" });
-        }
-
-        // The path stored in database is absolute, use it directly
-        const filepath = document.path;
-        if (!fs.existsSync(filepath)) {
-            console.error(`File not found at path: ${filepath}`);
-            return res.status(404).json({ error: "File not found on server" });
-        }
-
-        res.download(filepath, document.filename);
-    } catch (error) {
-        console.error("Error downloading document:", error);
-        res.status(500).json({ error: "Failed to download document" });
-    }
+    return res.status(404).json({ error: "Downloads are disabled." });
 });
 
 // DELETE /api/pdf/:id - Delete a generated document

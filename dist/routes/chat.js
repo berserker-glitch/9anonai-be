@@ -67,4 +67,46 @@ router.post("/", optionalAuth, async (req, res) => {
         }
     }
 });
+// Non-streaming endpoint for React Native (doesn't support ReadableStream)
+router.post("/non-stream", optionalAuth, async (req, res) => {
+    try {
+        const { message, history, images } = ChatSchema.parse(req.body);
+        const userId = req.userId;
+        // Consume Stream and collect all events
+        const stream = (0, lawyer_1.getLegalAdviceStream)(message, history || [], images || [], userId);
+        let fullContent = "";
+        let sources = [];
+        let contract = null;
+        for await (const event of stream) {
+            if (event.type === "token") {
+                fullContent += event.content;
+            }
+            else if (event.type === "citation") {
+                sources = event.sources || [];
+            }
+            else if (event.type === "contract_generated") {
+                contract = event.document ? {
+                    title: event.document.title,
+                    path: event.document.id,
+                    type: event.document.type
+                } : null;
+            }
+        }
+        res.json({
+            success: true,
+            content: fullContent,
+            sources,
+            contract
+        });
+    }
+    catch (error) {
+        console.error("Non-stream Chat API Error:", error);
+        if (error instanceof zod_1.z.ZodError) {
+            res.status(400).json({ success: false, error: error.errors });
+        }
+        else {
+            res.status(500).json({ success: false, error: "Internal Server Error" });
+        }
+    }
+});
 exports.default = router;

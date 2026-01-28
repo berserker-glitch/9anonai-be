@@ -8,7 +8,6 @@ const openai_1 = __importDefault(require("openai"));
 const config_1 = require("../config");
 const intent_classifier_1 = require("./intent-classifier");
 const query_router_1 = require("./query-router");
-const contract_generator_1 = require("./contract-generator");
 const prisma_1 = require("./prisma");
 const client = new openai_1.default({
     baseURL: config_1.config.openRouterBaseUrl,
@@ -18,105 +17,8 @@ const client = new openai_1.default({
         "X-Title": "9anon - Moroccan Legal AI",
     },
 });
-// Tool definition - now takes full content from AI
-const CONTRACT_TOOL = {
-    type: "function",
-    function: {
-        name: "generate_contract",
-        description: "Generate a PDF document from the contract content you write.",
-        parameters: {
-            type: "object",
-            properties: {
-                type: {
-                    type: "string",
-                    enum: ["rental", "employment", "service", "nda", "sales", "custom"],
-                    description: "Type of contract"
-                },
-                title: {
-                    type: "string",
-                    description: "Document title"
-                },
-                language: {
-                    type: "string",
-                    enum: ["en", "fr", "ar"],
-                    description: "Document language"
-                },
-                content: {
-                    type: "string",
-                    description: "The FULL contract content you have written. Include all articles, clauses, party details, and terms."
-                }
-            },
-            required: ["type", "language", "content"]
-        }
-    }
-};
-// Prompt for document generation - AI writes complete document (ANY type)
-const DOC_GEN_SYSTEM_PROMPT = `You are a Moroccan legal document writer. Write ANY type of legal document based on the user's request.
-
-YOUR TASK:
-1. Write the COMPLETE document content with all necessary sections
-2. Use information from the conversation
-3. For missing info, use placeholders like [NAME], [AMOUNT], [DATE], etc.
-4. Call generate_contract with your written content
-
-YOU CAN WRITE ANY DOCUMENT:
-- Rental/Lease agreements (Contrat de bail)
-- Employment contracts (Contrat de travail)
-- Service agreements (Contrat de prestation)
-- Sales contracts (Contrat de vente)
-- NDAs (Accord de confidentialité)
-- Power of attorney (Procuration)
-- Letters of demand
-- Termination notices
-- Any other legal document the user requests
-
-MANDATORY LEGAL CLAUSES (ALWAYS INCLUDE):
-1. CONSEQUENCES & PENALTIES:
-   - Late payment penalties (e.g., 5-10% per month delay)
-   - Breach of contract consequences
-   - Damages and compensation clauses
-   - Interest on overdue amounts
-
-2. TERMINATION PROVISIONS:
-   - Grounds for immediate termination
-   - Notice periods required
-   - Consequences of early termination
-   - Obligations upon termination
-
-3. DISPUTE RESOLUTION:
-   - Amicable settlement attempt requirement
-   - Competent court jurisdiction
-   - Arbitration clauses if applicable
-
-4. ENFORCEMENT:
-   - Right to legal action
-   - Seizure/attachment rights for unpaid debts
-   - Eviction procedures (for rental)
-   - Recovery of legal costs
-
-DOCUMENT STRUCTURE:
-- Title and date
-- Party identification (with CIN numbers)
-- Main clauses/articles
-- Terms and conditions
-- Consequences and penalties section
-- Termination conditions
-- Dispute resolution
-- Signature blocks
-- Legal references
-
-CRITICAL - LANGUAGE FOR PDF:
-- Match the user's language for the PDF content
-- English user = English PDF
-- French user = French PDF  
-- Arabic user = Arabic PDF (full Arabic support is available)
-- Use proper legal terminology for each language
-
-RULES:
-- Be professional and thorough
-- Include relevant Moroccan law references (Law 67.12 for rental, Labor Code for employment, D.O.C for general contracts)
-- Make contracts legally solid and enforceable
-- EVERY contract must have consequences for breach`;
+// Tool definition removed
+// DOC_GEN_SYSTEM_PROMPT removed
 const SYSTEM_PROMPT = `
 You are 9anon, a Moroccan law expert AI assistant.
 
@@ -226,25 +128,7 @@ function detectLanguage(text) {
  * Check if query is asking for document generation (FULLY FLEXIBLE)
  */
 function isDocumentRequest(query) {
-    const lowerQuery = query.toLowerCase();
-    // Generic document keywords - catches ANY type of contract/document
-    const docKeywords = ['contract', 'agreement', 'document', 'pdf', 'letter', 'notice', 'certificate', 'declaration', 'attestation', 'procuration', 'deed'];
-    const actionKeywords = ['generate', 'create', 'draft', 'make', 'write', 'prepare', 'need', 'want', 'give', 'can you', 'regenerate', 'redo', 'resend', 'again', 'same'];
-    // French keywords
-    const frDocKeywords = ['contrat', 'accord', 'document', 'lettre', 'attestation', 'certificat', 'procuration', 'acte'];
-    const frActionKeywords = ['créer', 'rédiger', 'générer', 'préparer', 'faire', 'donner', 'veux', 'besoin', 'refaire', 'même', 'nouveau'];
-    // Check if query contains any document keyword
-    const hasDocKeyword = docKeywords.some(k => lowerQuery.includes(k)) ||
-        frDocKeywords.some(k => lowerQuery.includes(k));
-    // Check if query contains any action keyword
-    const hasActionKeyword = actionKeywords.some(k => lowerQuery.includes(k)) ||
-        frActionKeywords.some(k => lowerQuery.includes(k));
-    // Arabic patterns - very broad
-    const arabicDocPattern = /عقد|وثيقة|اتفاقية|رسالة|شهادة|توكيل|صك|اعطني|اكتب|صياغة|انشاء|حرر/;
-    // Return true if we have both document and action keywords, OR just document keyword with context
-    return (hasDocKeyword && hasActionKeyword) ||
-        (hasDocKeyword && lowerQuery.length < 100) || // Short request with doc keyword
-        arabicDocPattern.test(query);
+    return false; // DISABLED: Contract generation tool is temporarily disabled
 }
 /**
  * Check if conversation has enough info to generate contract
@@ -280,6 +164,46 @@ function hasEnoughContractInfo(query, history) {
     const hasCIN = /(?:[A-Z]{1,2}\d{5,}|بطاقة|CIN|carte)/i.test(fullConvo);
     // More flexible: need at least 2 names OR (1 name + amounts/property/CIN)
     return nameCount >= 2 || (nameCount >= 1 && (hasAmounts || hasProperty || hasCIN));
+}
+/**
+ * Analyze query complexity to adjust response depth
+ */
+function analyzeComplexity(text) {
+    const words = text.trim().split(/\s+/).length;
+    // Length heuristic: Long queries are usually complex scenarios
+    if (words > 15)
+        return 'deep';
+    // Keyword heuristic: detailed scenarios
+    const deepKeywords = [
+        // English
+        "story", "situation", "happened", "problem", "issue", "case",
+        "accident", "died", "death", "killed", "murder",
+        "divorce", "married", "husband", "wife", "children", "custody",
+        "inheritance", "legacy", "heir",
+        "fired", "dismissed", "boss", "company", "work", "job",
+        "police", "arrested", "prison", "jail", "court",
+        "scam", "fraud", "money", "debt", "loan",
+        // French
+        "histoire", "situation", "problème", "cas",
+        "accident", "mort", "décès", "tué", "meurtre",
+        "divorce", "marié", "mari", "femme", "enfants", "garde",
+        "héritage", "succession", "héritier",
+        "licencié", "renvoyé", "patron", "entreprise", "travail", "boulot",
+        "police", "arrêté", "prison", "tribunal",
+        "arnaque", "fraude", "argent", "dette", "crédit",
+        // Arabic (Common keywords for stories/problems)
+        "مشكلة", "قصة", "حصل", "وقع", "حادثة",
+        "موت", "وفاة", "توفي", "قتل",
+        "طلاق", "زواج", "زوج", "زوجة", "أطفال", "حضانة",
+        "إرث", "ميراث", "ورثة",
+        "طرد", "فصل", "شغل", "عمل", "مدير",
+        "شرطة", "اعتقال", "سجن", "محكمة",
+        "نصب", "احتيال", "فلوس", "دين"
+    ];
+    const lowerText = text.toLowerCase();
+    if (deepKeywords.some(kw => lowerText.includes(kw)))
+        return 'deep';
+    return 'basic';
 }
 async function* getLegalAdviceStream(userQuery, history = [], images = [], userId) {
     try {
@@ -340,6 +264,36 @@ async function* getLegalAdviceStream(userQuery, history = [], images = [], userI
                 console.warn("Failed to fetch personalization", e);
             }
         }
+        // Complexity Analysis & Instruction Injection
+        const complexity = analyzeComplexity(userQuery);
+        let complexityInstruction = "";
+        if (complexity === "deep") {
+            complexityInstruction = `
+            
+=== DYNAMIC RESPONSE MODE: DEEP DIVE ===
+The user's query is identified as COMPLEX.
+INSTRUCTIONS:
+1. Provide a DETAILED and COMPREHENSIVE analysis.
+2. Break down the answer into clear sections (Legal Framework, Application to Case, Recommendations).
+3. Address nuances and potential "what if" scenarios.
+4. Do NOT be brief. Be thorough and explanatory.
+========================================
+`;
+        }
+        else {
+            complexityInstruction = `
+
+=== DYNAMIC RESPONSE MODE: CONCISE ===
+The user's query is identified as BASIC/INFORMATIONAL.
+INSTRUCTIONS:
+1. Provide a DIRECT and CONCISE answer.
+2. Cite the relevant article/law immediately.
+3. Keep it short and to the point. Avoid unnecessary preamble.
+======================================
+`;
+        }
+        // Append to personalization context (will be added to system prompt)
+        personalizationContext += complexityInstruction;
         // 1. Quick casual check
         let intent;
         if ((0, intent_classifier_1.isObviouslyCasual)(userQuery)) {
@@ -403,86 +357,25 @@ async function* getLegalAdviceStream(userQuery, history = [], images = [], userI
             yield { type: "citation", sources: allSources };
             let contextString = contextParts.length > 0 ? contextParts.join("\n\n---\n\n") : "";
             // ═══════════════════════════════════════════════════════════
-            // DOCUMENT GENERATION PATH
+            // REGULAR RESPONSE PATH
             // ═══════════════════════════════════════════════════════════
-            // Check current query AND history for document requests
-            const isDocRequestNow = isDocumentRequest(userQuery);
-            const wasDocRequestInHistory = history.some(m => isDocumentRequest(m.content || ""));
-            const isDocRequest = isDocRequestNow || wasDocRequestInHistory;
-            const hasEnoughInfo = hasEnoughContractInfo(userQuery, history);
-            console.log("Is document request (now):", isDocRequestNow, "Was in history:", wasDocRequestInHistory, "Has enough info:", hasEnoughInfo);
-            if (isDocRequest && hasEnoughInfo && userId) {
-                yield { type: "step", content: "Generating your PDF contract..." };
-                // Build conversation context for the AI to extract details
-                const conversationContext = history.map(m => `${m.role}: ${m.content}`).join("\n");
-                try {
-                    // Use function calling with FORCED tool choice
-                    const response = await client.chat.completions.create({
-                        model: "google/gemini-3-flash-preview",
-                        messages: [
-                            { role: "system", content: DOC_GEN_SYSTEM_PROMPT + personalizationContext },
-                            { role: "user", content: `Previous conversation:\n${conversationContext}\n\nLatest request: ${userQuery}\n\nGenerate the contract now.` }
-                        ],
-                        tools: [CONTRACT_TOOL],
-                        tool_choice: { type: "function", function: { name: "generate_contract" } },
-                    });
-                    const message = response.choices[0]?.message;
-                    console.log("Tool response:", JSON.stringify(message, null, 2));
-                    if (message?.tool_calls && message.tool_calls.length > 0) {
-                        const toolCall = message.tool_calls[0];
-                        const args = JSON.parse(toolCall.function.arguments);
-                        // Force correct language based on user's language
-                        args.language = userLang;
-                        // Simple contract data - AI generates the content
-                        const contractData = {
-                            type: args.type || "rental",
-                            title: args.title,
-                            language: args.language,
-                            content: args.content, // The full contract text from AI
-                        };
-                        const document = await (0, contract_generator_1.generateContract)(userId, contractData);
-                        yield { type: "contract_generated", document };
-                        // Confirmation message in user's language - NO EMOJIS
-                        const messages = {
-                            en: `**Contract Generated Successfully**\n\n**${document.title}**\n\nYour contract has been generated as a professional PDF document. Click the download button below to save it.\n\n**Important**: Have signatures legalized at your local commune (Moqata'a) and register the contract with tax authorities for full legal protection.`,
-                            fr: `**Contrat Généré avec Succès**\n\n**${document.title}**\n\nVotre contrat a été généré en format PDF professionnel. Cliquez sur le bouton ci-dessous pour le télécharger.\n\n**Important**: Faites légaliser les signatures auprès de votre commune et enregistrez le contrat aux impôts pour une protection juridique complète.`,
-                            ar: `**تم إنشاء العقد بنجاح**\n\n**${document.title}**\n\nتم إنشاء عقدك بصيغة PDF احترافية. انقر على زر التحميل أدناه لحفظه.\n\n**مهم**: قم بتصحيح الإمضاءات في الجماعة وسجل العقد لدى إدارة الضرائب لضمان الحماية القانونية الكاملة.`
-                        };
-                        yield { type: "token", content: messages[userLang] };
-                    }
-                    else {
-                        // Fallback if tool wasn't called
-                        console.error("Tool was not called, message:", message?.content);
-                        yield { type: "token", content: "I couldn't generate the PDF. Please provide all required details (names, addresses, amounts) and try again." };
-                    }
-                }
-                catch (error) {
-                    console.error("Contract generation error:", error);
-                    yield { type: "token", content: "Error generating contract. Please try again." };
-                }
-            }
-            else {
-                // ═══════════════════════════════════════════════════════════
-                // REGULAR RESPONSE PATH
-                // ═══════════════════════════════════════════════════════════
-                yield { type: "step", content: "Formulating response..." };
-                const userContent = contextString
-                    ? `Context:\n${contextString}\n\n---\n\nQuestion: ${userQuery}`
-                    : `Question: ${userQuery}`;
-                const stream = await client.chat.completions.create({
-                    model: "google/gemini-3-flash-preview",
-                    messages: [
-                        { role: "system", content: SYSTEM_PROMPT + personalizationContext },
-                        ...history.slice(-6).map((m) => ({ role: m.role, content: m.content })),
-                        { role: "user", content: buildUserContent(userContent) }
-                    ],
-                    stream: true,
-                });
-                for await (const chunk of stream) {
-                    const content = chunk.choices[0]?.delta?.content || "";
-                    if (content)
-                        yield { type: "token", content };
-                }
+            yield { type: "step", content: "Formulating response..." };
+            const userContent = contextString
+                ? `Context:\n${contextString}\n\n---\n\nQuestion: ${userQuery}`
+                : `Question: ${userQuery}`;
+            const stream = await client.chat.completions.create({
+                model: "google/gemini-3-flash-preview",
+                messages: [
+                    { role: "system", content: SYSTEM_PROMPT + personalizationContext },
+                    ...history.slice(-6).map((m) => ({ role: m.role, content: m.content })),
+                    { role: "user", content: buildUserContent(userContent) }
+                ],
+                stream: true,
+            });
+            for await (const chunk of stream) {
+                const content = chunk.choices[0]?.delta?.content || "";
+                if (content)
+                    yield { type: "token", content };
             }
         }
         yield { type: "done" };
