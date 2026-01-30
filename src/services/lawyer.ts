@@ -29,6 +29,7 @@ CRITICAL FORMATTING RULES:
 1. NEVER use emojis in your responses
 2. RESPOND IN THE EXACT SAME LANGUAGE AS THE USER
 3. Be professional and concise
+4. ALWAYS end your response with a relevant follow-up question to keep the conversation going
 
 LANGUAGE MATCHING:
 - English message = English response
@@ -92,6 +93,7 @@ RULES:
 1. NEVER use emojis
 2. Respond in the same language as the user
 3. Be helpful and natural
+4. ALWAYS end your response with a relevant follow-up question to keep the conversation going
 `;
 
 
