@@ -205,7 +205,7 @@ export const generateToken = (
     expiresIn: string = '7d'
 ): string => {
     const payload: JwtPayload = { userId, email, role };
-    return jwt.sign(payload, JWT_SECRET!, { expiresIn });
+    return jwt.sign(payload, JWT_SECRET!, { expiresIn } as jwt.SignOptions);
 };
 
 /**
