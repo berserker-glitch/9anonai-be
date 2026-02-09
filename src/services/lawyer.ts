@@ -448,9 +448,18 @@ INSTRUCTIONS:
                 confidenceNote = "NO DOCUMENTS FOUND: Answer based on your general knowledge of Moroccan law, but clearly warn the user that no specific source was found in the database.";
             }
 
+            // Hard language enforcement — placed AFTER context (strongest position)
+            // The context is in Arabic but the user may be asking in French/English
+            const langLabel: Record<string, string> = {
+                en: "MANDATORY: You MUST respond ENTIRELY in English. The context documents are in Arabic but your response MUST be in English.",
+                fr: "OBLIGATOIRE: Vous DEVEZ répondre ENTIÈREMENT en français. Les documents de contexte sont en arabe mais votre réponse DOIT être en français.",
+                ar: "يجب أن تكون إجابتك بالكامل باللغة العربية."
+            };
+            const langDirective = langLabel[userLang] || langLabel.en;
+
             const userContent = contextString
-                ? `[System Note]: ${confidenceNote}\n\nContext:\n${contextString}\n\n---\n\nQuestion: ${userQuery}`
-                : `[System Note]: ${confidenceNote}\n\nQuestion: ${userQuery}`;
+                ? `[System Note]: ${confidenceNote}\n\nContext:\n${contextString}\n\n---\n\n[LANGUAGE RULE]: ${langDirective}\n\nQuestion: ${userQuery}`
+                : `[System Note]: ${confidenceNote}\n\n[LANGUAGE RULE]: ${langDirective}\n\nQuestion: ${userQuery}`;
 
             const stream = await client.chat.completions.create({
                 model: "google/gemini-3-flash-preview",
