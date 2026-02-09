@@ -21,6 +21,7 @@ model User {
   chats         Chat[]
   files         UserFile[]
   documents     GeneratedDocument[]
+  contractSessions ContractSession[]
 }
 
 model Chat {
@@ -72,4 +73,36 @@ model GeneratedDocument {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contract Builder Models
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Tracks a contract drafting session with live HTML, review notes, and version history */
+model ContractSession {
+  id            String   @id @default(cuid())
+  title         String   @default("Untitled Contract")
+  contractType  String   // "rental", "employment", "nda", "service", "custom"
+  language      String   @default("fr") // "ar", "fr", "en"
+  htmlContent   String   @db.LongText // The live HTML of the contract
+  reviewNotes   String?  @db.Text // JSON: last legal review findings
+  version       Int      @default(1)
+  status        String   @default("draft") // "draft", "finalized"
+  metadata      String?  @db.Text // JSON: parties, extracted fields
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages      ContractMessage[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+/** Individual chat messages within a contract builder session */
+model ContractMessage {
+  id            String   @id @default(cuid())
+  role          String   // "user" | "assistant"
+  content       String   @db.Text
+  sessionId     String
+  session       ContractSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
 }

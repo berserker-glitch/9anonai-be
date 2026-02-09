@@ -15,6 +15,7 @@ import chatsRouter from "./routes/chats";
 import uploadRouter from "./routes/upload";
 import adminRouter from "./routes/admin";
 import pdfRouter from "./routes/pdf";
+import contractBuilderRouter from "./routes/contract-builder";
 
 // Middleware
 import { requestLogger, errorHandler, notFoundHandler } from "./middleware";
@@ -66,6 +67,7 @@ app.use("/api/chats", chatsRouter);    // Chat persistence (CRUD)
 app.use("/api/upload", uploadRouter);  // File uploads
 app.use("/api/admin", adminRouter);    // Admin dashboard
 app.use("/api/pdf", pdfRouter);        // PDF contract generation
+app.use("/api/contract-builder", contractBuilderRouter); // Contract Builder
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Health Check Endpoint
