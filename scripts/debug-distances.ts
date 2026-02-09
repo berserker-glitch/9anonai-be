@@ -1,31 +1,34 @@
 /**
- * Quick debug script to inspect raw LanceDB distances
+ * Quick debug: test with NO category filter to confirm scoring works
  */
-import { getTable } from "../src/services/db";
-import { getEmbedding } from "../src/services/bi";
+import { searchLegalDocs } from "../src/services/retriever";
 
 async function debug() {
-    const query = "ما هي شروط الطلاق في القانون المغربي؟";
+    const query = "ما هي فترة العدة للمطلقة؟";
 
-    const table = await getTable();
-    if (!table) {
-        console.log("No table found!");
-        return;
-    }
+    console.log("=== Test 1: NO FILTER ===");
+    const results1 = await searchLegalDocs(query, 5);
+    console.log(`Found: ${results1.length}`);
+    results1.forEach((r, i) => {
+        console.log(`  ${i + 1}. [${r.score?.toFixed(3)}] ${r.document_name} | ${r.category}`);
+    });
 
-    const embedding = await getEmbedding(query);
-    const results = await table.search(embedding).limit(5).toArray();
+    console.log("\n=== Test 2: WITH CATEGORY FILTER (Arabic) ===");
+    const results2 = await searchLegalDocs(query, 5, {
+        categories: ["أسرة", "زواج", "طلاق"]
+    });
+    console.log(`Found: ${results2.length}`);
+    results2.forEach((r, i) => {
+        console.log(`  ${i + 1}. [${r.score?.toFixed(3)}] ${r.document_name} | ${r.category}`);
+    });
 
-    console.log("\n=== RAW LANCEDB RESULTS ===\n");
-    results.forEach((r: any, i: number) => {
-        console.log(`Result ${i + 1}:`);
-        console.log(`  _distance: ${r._distance}`);
-        console.log(`  1/(1+d):   ${1 / (1 + r._distance)}`);
-        console.log(`  1-d:       ${1 - r._distance}`);
-        console.log(`  category:  ${r.category}`);
-        console.log(`  doc_name:  ${r.document_name}`);
-        console.log(`  text:      ${(r.text || '').substring(0, 100)}...`);
-        console.log();
+    console.log("\n=== Test 3: WITH BROADER FILTER ===");
+    const results3 = await searchLegalDocs(query, 5, {
+        categories: ["الأسرية"]
+    });
+    console.log(`Found: ${results3.length}`);
+    results3.forEach((r, i) => {
+        console.log(`  ${i + 1}. [${r.score?.toFixed(3)}] ${r.document_name} | ${r.category}`);
     });
 }
 

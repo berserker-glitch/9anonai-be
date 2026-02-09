@@ -2,18 +2,18 @@ import { Intent } from "./intent-classifier";
 import { searchLegalDocs, LegalDocument } from "./retriever";
 import { logger } from "./logger";
 import { config } from "../config";
-
-// Map legal domains to database categories
+// Map legal domains to actual database category names
+// These MUST match the category values stored in LanceDB (from the data/processed/text folder structure)
 const DOMAIN_TO_CATEGORIES: Record<string, string[]> = {
-    family: ["famille", "statut personnel", "mariage", "divorce", "héritage", "أسرة", "زواج", "طلاق"],
-    criminal: ["pénal", "criminel", "infractions", "sanctions", "جنائي", "عقوبات"],
-    business: ["commercial", "société", "entreprise", "commerce", "تجاري", "شركات"],
-    labor: ["travail", "emploi", "sécurité sociale", "protection sociale", "شغل", "ضمان اجتماعي"],
-    property: ["immobilier", "foncier", "propriété", "urbanisme", "عقار", "تحفيظ"],
-    administrative: ["administratif", "fonction publique", "état", "إداري", "وظيفة عمومية"],
-    civil: ["civil", "obligations", "contrats", "مدني", "التزامات"],
-    constitutional: ["constitution", "libertés", "droits fondamentaux", "دستور"],
-    tax: ["fiscal", "impôts", "douane", "TVA", "ضريبة", "جبايات"],
+    family: ["الأسرية", "famille", "statut personnel"],
+    criminal: ["الجنائية", "الأمنية", "pénal", "criminel"],
+    business: ["التجارية", "الاستثمار", "commercial", "société"],
+    labor: ["الاجتماعية", "الوظيفة العمومية", "travail", "emploi"],
+    property: ["العقارية", "الكرائية", "immobilier", "foncier"],
+    administrative: ["الإدارية", "الجماعات الترابية", "administratif"],
+    civil: ["المدنية", "civil", "obligations"],
+    constitutional: ["الدستورية", "التشريعية", "التنفيذية", "القضائية", "constitution"],
+    tax: ["الجبائية", "المالية", "fiscal", "impôts"],
     other: [], // No filter, search all
 };
 
@@ -78,12 +78,12 @@ export async function routeQuery(intent: Intent, query: string): Promise<RouteRe
         const finalResults = results.slice(0, isComplex ? 6 : 4);
 
         // Determine retrieval confidence based on L2-derived scores
-        // For 1/(1+d) with L2 distance: 0.49+ = good, 0.45+ = decent, 0.40+ = marginal
+        // Observed range: 0.44-0.49 for good results with text-embedding-3-small
         let confidence: "high" | "medium" | "low" | "none" = "none";
         if (finalResults.length > 0) {
             const avgScore = finalResults.reduce((sum, r) => sum + (r.score || 0), 0) / finalResults.length;
-            if (avgScore > 0.49) confidence = "high";
-            else if (avgScore > 0.45) confidence = "medium";
+            if (avgScore > 0.47) confidence = "high";
+            else if (avgScore > 0.43) confidence = "medium";
             else confidence = "low";
         }
 
