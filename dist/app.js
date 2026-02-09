@@ -18,6 +18,7 @@ const chats_1 = __importDefault(require("./routes/chats"));
 const upload_1 = __importDefault(require("./routes/upload"));
 const admin_1 = __importDefault(require("./routes/admin"));
 const pdf_1 = __importDefault(require("./routes/pdf"));
+const contract_builder_1 = __importDefault(require("./routes/contract-builder"));
 // Middleware
 const middleware_1 = require("./middleware");
 const logger_1 = require("./services/logger");
@@ -58,6 +59,7 @@ app.use("/api/chats", chats_1.default); // Chat persistence (CRUD)
 app.use("/api/upload", upload_1.default); // File uploads
 app.use("/api/admin", admin_1.default); // Admin dashboard
 app.use("/api/pdf", pdf_1.default); // PDF contract generation
+app.use("/api/contract-builder", contract_builder_1.default); // Contract Builder
 // ─────────────────────────────────────────────────────────────────────────────
 // Health Check Endpoint
 // ─────────────────────────────────────────────────────────────────────────────

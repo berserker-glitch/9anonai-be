@@ -47,20 +47,29 @@ if (!fs_1.default.existsSync(dbDir)) {
     fs_1.default.mkdirSync(dbDir, { recursive: true });
 }
 let dbInstance = null;
+const logger_1 = require("./logger");
 const getDb = async () => {
     if (!dbInstance) {
+        logger_1.logger.info(`[DB] Connecting to LanceDB at ${config_1.config.dbPath}`);
         dbInstance = await lancedb.connect(config_1.config.dbPath);
     }
     return dbInstance;
 };
 exports.getDb = getDb;
 const getTable = async (tableName = config_1.config.tableName) => {
-    const db = await (0, exports.getDb)();
-    // Check if table exists
-    const tables = await db.tableNames();
-    if (tables.includes(tableName)) {
-        return await db.openTable(tableName);
+    try {
+        const db = await (0, exports.getDb)();
+        const tables = await db.tableNames();
+        if (tables.includes(tableName)) {
+            // logger.debug(`[DB] Accessed table: ${tableName}`);
+            return await db.openTable(tableName);
+        }
+        logger_1.logger.warn(`[DB] Table not found: ${tableName}`);
+        return null;
     }
-    return null;
+    catch (error) {
+        logger_1.logger.error(`[DB] Error accessing table ${tableName}:`, { error });
+        throw error;
+    }
 };
 exports.getTable = getTable;

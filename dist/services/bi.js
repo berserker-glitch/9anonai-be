@@ -14,16 +14,26 @@ const client = new openai_1.default({
         "X-Title": "Moroccan Legal AI Backend",
     },
 });
+const embedding_cache_1 = require("./embedding-cache");
+const logger_1 = require("./logger");
 const getEmbedding = async (text) => {
+    // Check cache first
+    const cached = embedding_cache_1.embeddingCache.get(text);
+    if (cached) {
+        return cached;
+    }
     try {
         const response = await client.embeddings.create({
             model: config_1.config.embeddingModelName,
             input: text,
         });
-        return response.data[0].embedding;
+        const embedding = response.data[0].embedding;
+        // Cache the result
+        embedding_cache_1.embeddingCache.set(text, embedding);
+        return embedding;
     }
     catch (error) {
-        console.error("Error generating embedding:", error);
+        logger_1.logger.error("Error generating embedding:", { error });
         throw error;
     }
 };
