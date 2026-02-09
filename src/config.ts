@@ -15,7 +15,7 @@ export const config = {
     tableName: "moroccan_laws",
 
     // Retrieval Tuning
-    minRelevanceScore: 0.35,      // Minimum similarity score to be considered relevant
+    minRelevanceScore: 0.40,      // Minimum similarity score (L2-based: 1/(1+d), good results are ~0.49+)
     maxContextTokens: 3500,       // Max tokens for LLM context (approx)
     embeddingCacheSize: 500,      // Number of embeddings to keep in memory
     enableFTS: true,              // Enable Full-Text Search hybrid retrieval

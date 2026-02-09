@@ -67,11 +67,11 @@ export const searchLegalDocs = async (
 
         const processedResults = results
             .map((r: any, idx: number) => {
-                // Calculate similarity score (assumes cosine distance)
-                // LanceDB distance: 0 = identical, 1 = opposite/orthogonal usually for normalized vectors
-                // Similarity = 1 - distance
+                // Calculate similarity score from L2 (Euclidean) distance
+                // LanceDB uses L2 distance by default: 0 = identical, higher = less similar
+                // Convert to 0-1 similarity: 1/(1+d) maps [0,inf) -> (0,1]
                 const distance = r._distance || 0;
-                const score = 1 - distance;
+                const score = 1 / (1 + distance);
 
                 return {
                     id: r.id || `doc_${idx}`,
