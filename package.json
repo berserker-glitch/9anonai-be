@@ -7,7 +7,8 @@
         "start": "node dist/app.js",
         "dev": "ts-node src/app.ts",
         "build": "prisma generate && tsc",
-        "ingest": "ts-node scripts/ingest.ts"
+        "ingest": "ts-node scripts/ingest.ts",
+        "generate-articles": "ts-node scripts/generate-articles.ts"
     },
     "dependencies": {
         "@lancedb/lancedb": "^0.23.0",
