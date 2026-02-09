@@ -77,11 +77,12 @@ export async function routeQuery(intent: Intent, query: string): Promise<RouteRe
         // For now, just slice to the final context limit
         const finalResults = results.slice(0, isComplex ? 6 : 4);
 
-        // Determine network confidence
+        // Determine retrieval confidence based on L2-derived scores
+        // For 1/(1+d) with L2 distance: 0.49+ = good, 0.45+ = decent, 0.40+ = marginal
         let confidence: "high" | "medium" | "low" | "none" = "none";
         if (finalResults.length > 0) {
             const avgScore = finalResults.reduce((sum, r) => sum + (r.score || 0), 0) / finalResults.length;
-            if (avgScore > 0.65) confidence = "high";
+            if (avgScore > 0.49) confidence = "high";
             else if (avgScore > 0.45) confidence = "medium";
             else confidence = "low";
         }
