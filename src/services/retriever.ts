@@ -49,8 +49,9 @@ export const searchLegalDocs = async (
             const validCategories = options.categories.filter(c => c && typeof c === 'string');
 
             if (validCategories.length > 0) {
+                // Use LIKE for fuzzy matching of category folders
                 const categoryConditions = validCategories
-                    .map(cat => `category = '${cat.replace(/'/g, "''")}'`) // Exact match is better than LIKE for categories
+                    .map(cat => `category LIKE '%${cat.replace(/'/g, "''")}%'`)
                     .join(" OR ");
 
                 search = search.where(categoryConditions);
