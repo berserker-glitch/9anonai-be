@@ -10,15 +10,29 @@ const client = new OpenAI({
     },
 });
 
+import { embeddingCache } from "./embedding-cache";
+import { logger } from "./logger";
+
 export const getEmbedding = async (text: string): Promise<number[]> => {
+    // Check cache first
+    const cached = embeddingCache.get(text);
+    if (cached) {
+        return cached;
+    }
+
     try {
         const response = await client.embeddings.create({
             model: config.embeddingModelName,
             input: text,
         });
-        return response.data[0].embedding;
+        const embedding = response.data[0].embedding;
+
+        // Cache the result
+        embeddingCache.set(text, embedding);
+
+        return embedding;
     } catch (error) {
-        console.error("Error generating embedding:", error);
+        logger.error("Error generating embedding:", { error });
         throw error;
     }
 };
