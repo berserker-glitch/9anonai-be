@@ -19,6 +19,9 @@ const router = Router();
 /**
  * Schema for chat request body validation.
  */
+/**
+ * Schema for chat request body validation.
+ */
 const ChatSchema = z.object({
     /** User's message/question */
     message: z.string().min(1, "Message cannot be empty"),
@@ -29,11 +32,15 @@ const ChatSchema = z.object({
         data: z.string(), // base64 encoded
         mimeType: z.string(),
     })).optional(),
+    /** Chat ID for message persistence */
+    chatId: z.string().optional(),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Routes
 // ─────────────────────────────────────────────────────────────────────────────
+
+import { prisma } from "../services/prisma";
 
 /**
  * POST /api/chat
@@ -45,6 +52,7 @@ const ChatSchema = z.object({
  * @param {string} req.body.message - User's question or message
  * @param {Array} [req.body.history] - Previous messages for context
  * @param {Array} [req.body.images] - Image attachments (base64)
+ * @param {string} [req.body.chatId] - Chat ID to save the response to
  * @returns {stream} SSE stream with AI response tokens and metadata
  */
 router.post("/", optionalAuth, async (req: Request, res: Response) => {
@@ -54,7 +62,7 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
     res.setHeader("Connection", "keep-alive");
 
     try {
-        const { message, history, images } = ChatSchema.parse(req.body);
+        const { message, history, images, chatId } = ChatSchema.parse(req.body);
         const userId = (req as AuthenticatedRequest).userId;
 
         // Log chat event
@@ -72,9 +80,67 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
             userId
         );
 
+        let fullContent = "";
+        let sources: any[] = [];
+        let contract: any = null;
+
         // Stream events to client
         for await (const event of stream) {
             res.write(`data: ${JSON.stringify(event)}\n\n`);
+
+            // Accumulate response data for persistence
+            if (event.type === "token") {
+                fullContent += event.content;
+            } else if (event.type === "citation") {
+                sources = event.sources || [];
+            } else if (event.type === "contract_generated") {
+                contract = event.document ? {
+                    title: event.document.title,
+                    path: event.document.id,
+                    type: event.document.type
+                } : null;
+            }
+        }
+
+        // Save completed message to database if chatId is provided
+        if (chatId && fullContent) {
+            try {
+                // If user is authenticated, verify chat ownership before saving
+                if (userId) {
+                    const chat = await prisma.chat.findUnique({
+                        where: { id: chatId, userId },
+                        select: { id: true }
+                    });
+
+                    if (chat) {
+                        await prisma.message.create({
+                            data: {
+                                role: "assistant",
+                                content: fullContent,
+                                sources: sources.length > 0 ? JSON.stringify(sources) : null,
+                                attachmentUrl: contract ? contract.path : null,
+                                attachmentName: contract ? contract.title : null,
+                                chatId,
+                                isActive: true,
+                                version: 1
+                            }
+                        });
+
+                        // Update chat timestamp
+                        await prisma.chat.update({
+                            where: { id: chatId },
+                            data: { updatedAt: new Date() }
+                        });
+
+                        logger.debug(`[CHAT] Saved assistant response to chat ${chatId}`);
+                    } else {
+                        logger.warn(`[CHAT] Skipped saving: Chat ${chatId} not found or not owned by user ${userId}`);
+                    }
+                }
+            } catch (dbError) {
+                logger.error("[CHAT] Failed to save assistant message", { error: dbError });
+                // We don't fail the request here since the stream was successful
+            }
         }
 
         logChatEvent("stream_complete", userId || null);
