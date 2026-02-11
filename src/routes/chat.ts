@@ -19,9 +19,6 @@ const router = Router();
 /**
  * Schema for chat request body validation.
  */
-/**
- * Schema for chat request body validation.
- */
 const ChatSchema = z.object({
     /** User's message/question */
     message: z.string().min(1, "Message cannot be empty"),
@@ -136,11 +133,16 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
                     } else {
                         logger.warn(`[CHAT] Skipped saving: Chat ${chatId} not found or not owned by user ${userId}`);
                     }
+                } else {
+                    logger.warn(`[CHAT] Skipped saving: User not authenticated for chat ${chatId}`);
                 }
             } catch (dbError) {
                 logger.error("[CHAT] Failed to save assistant message", { error: dbError });
                 // We don't fail the request here since the stream was successful
             }
+        } else {
+            if (!chatId) logger.warn("[CHAT] Skipped saving: No chatId provided");
+            if (!fullContent) logger.warn("[CHAT] Skipped saving: No content generated");
         }
 
         logChatEvent("stream_complete", userId || null);
