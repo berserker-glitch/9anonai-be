@@ -9,14 +9,15 @@
  */
 
 import dotenv from "dotenv";
+// Load environment variables before other imports
+dotenv.config();
+
 import OpenAI from "openai";
 import * as fs from "fs";
 import * as path from "path";
 import { getTable } from "../src/services/db";
 import { getEmbedding } from "../src/services/bi";
 
-// Load environment variables
-dotenv.config();
 
 // Configure OpenAI client with OpenRouter
 const client = new OpenAI({
@@ -32,128 +33,78 @@ const client = new OpenAI({
  * Blog topics to generate - covering different areas of Moroccan law
  * Each topic includes a slug, titles in 3 languages, and keywords for RAG search
  */
-const BLOG_TOPICS = [
-    {
-        slug: "understanding-moudawana-family-code",
-        titles: {
-            ar: "فهم مدونة الأسرة المغربية: الحقوق والواجبات",
-            en: "Understanding Morocco's Family Code (Moudawana): Rights and Responsibilities",
-            fr: "Comprendre le Code de la Famille Marocain (Moudawana) : Droits et Responsabilités"
-        },
-        descriptions: {
-            ar: "دليل شامل حول مدونة الأسرة المغربية وما تتضمنه من حقوق وواجبات للأسرة",
-            en: "A comprehensive guide to Morocco's Family Code and the rights and duties it entails",
-            fr: "Un guide complet sur le Code de la Famille marocain et les droits et devoirs qu'il implique"
-        },
-        searchQuery: "القانون الأحوال الشخصية المدونة الأسرة حقوق الأسرة الزواج الطلاق",
-        keywords: ["family law", "moudawana", "marriage", "divorce", "custody"]
+/**
+ * Scan existing blogs to get a set of used slugs
+ */
+function getExistingSlugs(outputDir: string): Set<string> {
+    const slugs = new Set<string>();
+    if (!fs.existsSync(outputDir)) return slugs;
+
+    const files = fs.readdirSync(outputDir);
+    files.forEach(file => {
+        if (file.endsWith(".md")) {
+            // Remove lang suffixes (.en.md, .fr.md) and extension
+            const slug = file.replace(/\.(en|fr)\.md$/, "").replace(/\.md$/, "");
+            slugs.add(slug);
+        }
+    });
+    return slugs;
+}
+
+/**
+ * Generate NEW topics using LLM that don't exist in the current set
+ */
+async function generateNewTopics(existingSlugs: Set<string>, count: number = 3): Promise<any[]> {
+    const existingList = Array.from(existingSlugs).join(", ");
+
+    const systemPrompt = `You are a content strategist for a Moroccan legal blog "9anon".
+Your goal is to suggest ${count} NEW, UNIQUE, and HIGH-VALUE blog topics about Moroccan law.
+You must NOT suggest topics that are already covered.
+
+ALREADY COVERED TOPICS (DO NOT REPEAT):
+${existingList}
+
+Return the response as a JSON array of objects with this EXACT structure:
+[
+  {
+    "slug": "kebab-case-slug-in-english",
+    "titles": {
+      "ar": "Arabic Title",
+      "en": "English Title",
+      "fr": "French Title"
     },
-    {
-        slug: "morocco-labor-code-employee-rights",
-        titles: {
-            ar: "مدونة الشغل المغربية: حقوق العمال وواجبات المشغلين",
-            en: "Morocco's Labor Code: Employee Rights and Employer Obligations",
-            fr: "Le Code du Travail Marocain : Droits des Employés et Obligations des Employeurs"
-        },
-        descriptions: {
-            ar: "كل ما تحتاج معرفته عن حقوقك كعامل في المغرب وفق مدونة الشغل",
-            en: "Everything you need to know about your rights as an employee in Morocco",
-            fr: "Tout ce que vous devez savoir sur vos droits en tant qu'employé au Maroc"
-        },
-        searchQuery: "مدونة الشغل حقوق العمال الأجور العقود الطرد التعسفي",
-        keywords: ["labor law", "employment", "worker rights", "contracts", "dismissal"]
+    "descriptions": {
+      "ar": "Arabic Description",
+      "en": "English Description",
+      "fr": "French Description"
     },
-    {
-        slug: "criminal-justice-penal-code-morocco",
-        titles: {
-            ar: "العدالة الجنائية في المغرب: شرح القانون الجنائي",
-            en: "Criminal Justice in Morocco: The Penal Code Explained",
-            fr: "La Justice Pénale au Maroc : Explication du Code Pénal"
-        },
-        descriptions: {
-            ar: "فهم القانون الجنائي المغربي والعقوبات المقررة للجرائم المختلفة",
-            en: "Understanding Moroccan criminal law and penalties for various offenses",
-            fr: "Comprendre le droit pénal marocain et les sanctions pour diverses infractions"
-        },
-        searchQuery: "القانون الجنائي المغربي العقوبات الجرائم المحكمة",
-        keywords: ["penal code", "criminal law", "offenses", "penalties", "courts"]
-    },
-    {
-        slug: "property-law-buying-selling-inheritance",
-        titles: {
-            ar: "قانون العقارات في المغرب: البيع والشراء والإرث",
-            en: "Property Law in Morocco: Buying, Selling, and Inheritance",
-            fr: "Le Droit Immobilier au Maroc : Achat, Vente et Héritage"
-        },
-        descriptions: {
-            ar: "دليلك الكامل للتعامل مع العقارات في المغرب من الشراء إلى الإرث",
-            en: "Your complete guide to dealing with real estate in Morocco",
-            fr: "Votre guide complet pour les transactions immobilières au Maroc"
-        },
-        searchQuery: "القانون العقاري الملكية البيع الشراء الإرث التحفيظ العقاري",
-        keywords: ["property law", "real estate", "inheritance", "registration", "ownership"]
-    },
-    {
-        slug: "commercial-law-starting-business-morocco",
-        titles: {
-            ar: "القانون التجاري في المغرب: تأسيس وإدارة الشركات",
-            en: "Commercial Law in Morocco: Starting and Running a Business",
-            fr: "Le Droit Commercial au Maroc : Création et Gestion d'Entreprise"
-        },
-        descriptions: {
-            ar: "كيفية تأسيس شركة في المغرب والإطار القانوني للأنشطة التجارية",
-            en: "How to start a company in Morocco and the legal framework for business",
-            fr: "Comment créer une entreprise au Maroc et le cadre juridique des affaires"
-        },
-        searchQuery: "القانون التجاري الشركات التأسيس السجل التجاري التجارة",
-        keywords: ["commercial law", "business", "company formation", "trade", "commerce"]
-    },
-    {
-        slug: "consumer-protection-rights-morocco",
-        titles: {
-            ar: "حماية المستهلك في المغرب: حقوقك وكيفية المطالبة بها",
-            en: "Consumer Protection Rights Under Moroccan Law",
-            fr: "La Protection du Consommateur au Maroc : Vos Droits"
-        },
-        descriptions: {
-            ar: "تعرف على حقوقك كمستهلك في المغرب وكيفية تقديم الشكاوى",
-            en: "Know your consumer rights in Morocco and how to file complaints",
-            fr: "Connaissez vos droits de consommateur au Maroc et comment porter plainte"
-        },
-        searchQuery: "حماية المستهلك الضمان الحقوق التجارة الشكاوى",
-        keywords: ["consumer rights", "protection", "warranties", "complaints", "commerce"]
-    },
-    {
-        slug: "digital-privacy-cybercrime-laws",
-        titles: {
-            ar: "الخصوصية الرقمية وقوانين الجرائم الإلكترونية في المغرب",
-            en: "Digital Privacy and Cybercrime Laws in Morocco",
-            fr: "Vie Privée Numérique et Lois sur la Cybercriminalité au Maroc"
-        },
-        descriptions: {
-            ar: "حماية بياناتك الشخصية والعقوبات المقررة للجرائم الإلكترونية",
-            en: "Protecting your personal data and penalties for cybercrime",
-            fr: "Protection de vos données personnelles et sanctions pour cybercriminalité"
-        },
-        searchQuery: "حماية المعطيات الشخصية الجرائم الإلكترونية الخصوصية الإنترنت",
-        keywords: ["data protection", "privacy", "cybercrime", "digital rights", "internet"]
-    },
-    {
-        slug: "administrative-law-citizen-rights",
-        titles: {
-            ar: "القانون الإداري في المغرب: حقوق المواطن أمام الإدارة",
-            en: "Administrative Law in Morocco: Citizen Rights Against Government",
-            fr: "Le Droit Administratif au Maroc : Droits du Citoyen face à l'Administration"
-        },
-        descriptions: {
-            ar: "كيفية الطعن في القرارات الإدارية وحماية حقوقك أمام الإدارة",
-            en: "How to challenge administrative decisions and protect your rights",
-            fr: "Comment contester les décisions administratives et protéger vos droits"
-        },
-        searchQuery: "القانون الإداري الطعون المحاكم الإدارية الحقوق الإدارة",
-        keywords: ["administrative law", "courts", "appeals", "government", "citizens"]
+    "searchQuery": "Arabic search query for RAG",
+    "keywords": ["keyword1", "keyword2"]
+  }
+]`;
+
+    const response = await client.chat.completions.create({
+        model: "google/gemini-2.0-flash-001",
+        messages: [{ role: "system", content: systemPrompt }],
+        max_tokens: 8000,
+        response_format: { type: "json_object" }
+    });
+
+    const content = response.choices[0]?.message?.content || "[]";
+    try {
+        // Strip out markdown code blocks if present (```json ... ``` or just ``` ... ```)
+        let jsonStr = content.replace(/^```(json)?\s*/, "").replace(/\s*```$/, "");
+        // Remove any leading/trailing whitespace
+        jsonStr = jsonStr.trim();
+
+        const parsed = JSON.parse(jsonStr);
+        return Array.isArray(parsed) ? parsed : (parsed.topics || []);
+    } catch (e) {
+        console.error("Failed to parse generated topics:", e);
+        console.error("Raw content:", content);
+        return [];
     }
-];
+}
 
 /**
  * Language configuration for article generation
@@ -232,6 +183,14 @@ ${doc.text}
     }).join("\n\n");
 }
 
+interface BlogTopic {
+    slug: string;
+    titles: { ar: string; en: string; fr: string };
+    descriptions: { ar: string; en: string; fr: string };
+    searchQuery: string;
+    keywords: string[];
+}
+
 /**
  * Generate a single blog article in a specific language
  * 
@@ -243,7 +202,7 @@ ${doc.text}
  * @returns Generated blog object
  */
 async function generateBlogInLanguage(
-    topic: typeof BLOG_TOPICS[0],
+    topic: BlogTopic,
     language: typeof LANGUAGES[0],
     context: string,
     topicIndex: number,
@@ -392,9 +351,26 @@ async function main(): Promise<void> {
     let failCount = 0;
 
     // Generate all 8 articles in 3 languages
-    for (let topicIdx = 0; topicIdx < BLOG_TOPICS.length; topicIdx++) {
-        const topic = BLOG_TOPICS[topicIdx];
-        console.log(`\n📝 [${topicIdx + 1}/8] Topic: "${topic.titles.en}"`);
+    // Step 0: Get existing slugs and generate NEW topics
+    console.log(`   🔍 Scanning existing blogs...`);
+    const existingSlugs = getExistingSlugs(outputDir);
+    console.log(`   ✅ Found ${existingSlugs.size} existing articles/topics`);
+
+    console.log(`   🧠 Generating 8 NEW unique topics...`);
+    const newTopics = await generateNewTopics(existingSlugs, 8);
+
+    if (newTopics.length === 0) {
+        console.log("   ⚠️ No new topics generated. Exiting.");
+        return;
+    }
+
+    console.log(`   ✅ Generated ${newTopics.length} new topics:\n`);
+    newTopics.forEach((t, i) => console.log(`      ${i + 1}. ${t.slug}`));
+
+    // Generate articles for the new topics
+    for (let topicIdx = 0; topicIdx < newTopics.length; topicIdx++) {
+        const topic = newTopics[topicIdx];
+        console.log(`\n📝 [${topicIdx + 1}/${newTopics.length}] Topic: "${topic.titles.en}"`);
 
         // Step 1: Search for relevant legal context using RAG (once per topic)
         console.log(`   🔍 Searching legal database...`);
@@ -423,7 +399,7 @@ async function main(): Promise<void> {
         }
 
         // Delay between topics
-        if (topicIdx < BLOG_TOPICS.length - 1) {
+        if (topicIdx < newTopics.length - 1) {
             console.log(`   ⏳ Waiting 3 seconds before next topic...`);
             await new Promise(resolve => setTimeout(resolve, 3000));
         }
@@ -441,21 +417,6 @@ async function main(): Promise<void> {
     }
     console.log(`⏱️  Total time: ${duration} minutes`);
     console.log(`📁 Blogs saved to: ${outputDir}`);
-
-    // List the newly generated files
-    console.log("\n📄 Generated blog files:");
-    BLOG_TOPICS.forEach(topic => {
-        console.log(`   📂 ${topic.slug}`);
-        LANGUAGES.forEach(lang => {
-            const filename = `${topic.slug}${lang.suffix}.md`;
-            const filepath = path.join(outputDir, filename);
-            if (fs.existsSync(filepath)) {
-                console.log(`      ✅ ${filename}`);
-            } else {
-                console.log(`      ❌ ${filename} (missing)`);
-            }
-        });
-    });
 }
 
 // Execute the main function
