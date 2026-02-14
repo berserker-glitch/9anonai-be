@@ -110,11 +110,13 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
                     });
 
                     if (chat) {
+                        const messageSources = sources.length > 0 ? JSON.stringify(sources) : null;
+
                         await prisma.message.create({
                             data: {
                                 role: "assistant",
                                 content: fullContent,
-                                sources: sources.length > 0 ? JSON.stringify(sources) : null,
+                                sources: messageSources,
                                 attachmentUrl: contract ? contract.path : null,
                                 attachmentName: contract ? contract.title : null,
                                 chatId,
@@ -129,7 +131,7 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
                             data: { updatedAt: new Date() }
                         });
 
-                        logger.debug(`[CHAT] Saved assistant response to chat ${chatId}`);
+                        logger.info(`[CHAT] Saved assistant response to chat ${chatId}`);
                     } else {
                         logger.warn(`[CHAT] Skipped saving: Chat ${chatId} not found or not owned by user ${userId}`);
                     }
@@ -137,7 +139,11 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
                     logger.warn(`[CHAT] Skipped saving: User not authenticated for chat ${chatId}`);
                 }
             } catch (dbError) {
-                logger.error("[CHAT] Failed to save assistant message", { error: dbError });
+                logger.error("[CHAT] Failed to save assistant message", {
+                    error: dbError instanceof Error ? dbError.message : String(dbError),
+                    chatId,
+                    userId
+                });
                 // We don't fail the request here since the stream was successful
             }
         } else {
