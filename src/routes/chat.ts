@@ -68,7 +68,8 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
         logChatEvent("stream_start", userId || null, {
             messageLength: message.length,
             historyLength: history?.length || 0,
-            imageCount: images?.length || 0
+            imageCount: images?.length || 0,
+            chatId: chatId || "none"
         });
 
         // Start streaming response
