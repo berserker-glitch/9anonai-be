@@ -62,6 +62,8 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
         const { message, history, images, chatId } = ChatSchema.parse(req.body);
         const userId = (req as AuthenticatedRequest).userId;
 
+        console.log(`[CHAT] Incoming | UserId: ${userId || 'guest'} | ChatId: ${chatId || 'none'} | Msg: ${message.substring(0, 30)}...`);
+
         // Log chat event
         logChatEvent("stream_start", userId || null, {
             messageLength: message.length,
@@ -104,7 +106,7 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
             try {
                 // If user is authenticated, verify chat ownership before saving
                 if (userId) {
-                    const chat = await prisma.chat.findUnique({
+                    const chat = await prisma.chat.findFirst({
                         where: { id: chatId, userId },
                         select: { id: true }
                     });
@@ -132,11 +134,14 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
                         });
 
                         logger.info(`[CHAT] Saved assistant response to chat ${chatId}`);
+                        console.log(`✅ [PERSISTENCE] Saved to chat ${chatId}`);
                     } else {
-                        logger.warn(`[CHAT] Skipped saving: Chat ${chatId} not found or not owned by user ${userId}`);
+                        logger.warn(`[CHAT] Skipped saving: Chat ${chatId} not found or mismatch for user ${userId}`);
+                        console.log(`⚠️ [PERSISTENCE] Chat ${chatId} not found or ownership mismatch for user ${userId}`);
                     }
                 } else {
                     logger.warn(`[CHAT] Skipped saving: User not authenticated for chat ${chatId}`);
+                    console.log(`⚠️ [PERSISTENCE] User not authenticated for chat ${chatId}`);
                 }
             } catch (dbError) {
                 logger.error("[CHAT] Failed to save assistant message", {
