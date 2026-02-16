@@ -35,6 +35,7 @@ router.get("/users", authenticate, requireSuperAdmin, asyncHandler(async (req: R
             name: true,
             role: true,
             createdAt: true,
+            marketingSource: true,
             _count: {
                 select: {
                     chats: true
@@ -60,6 +61,7 @@ router.get("/users", authenticate, requireSuperAdmin, asyncHandler(async (req: R
         name: user.name,
         role: user.role,
         createdAt: user.createdAt,
+        marketingSource: user.marketingSource,
         conversationCount: user._count.chats,
         messageCount: user.chats.reduce((total, chat) => total + chat._count.messages, 0)
     }));
