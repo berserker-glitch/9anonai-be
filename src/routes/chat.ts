@@ -83,12 +83,13 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
         let fullContent = "";
         let sources: any[] = [];
         let contract: any = null;
+        let clientDisconnected = false;
 
         // Stream events to client
+        // NOTE: Accumulate content BEFORE writing to client —
+        // ensures data is captured even if client disconnects mid-stream
         for await (const event of stream) {
-            res.write(`data: ${JSON.stringify(event)}\n\n`);
-
-            // Accumulate response data for persistence
+            // Accumulate response data for persistence FIRST
             if (event.type === "token") {
                 fullContent += event.content;
             } else if (event.type === "citation") {
@@ -99,6 +100,21 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
                     path: event.document.id,
                     type: event.document.type
                 } : null;
+            }
+
+            // Write to client — wrapped to handle disconnect gracefully
+            try {
+                res.write(`data: ${JSON.stringify(event)}\n\n`);
+            } catch (writeError) {
+                // Client/proxy closed the connection mid-stream
+                // Break the loop but still proceed to save accumulated content
+                clientDisconnected = true;
+                logger.warn(`[CHAT] Client disconnected mid-stream`, {
+                    chatId: chatId || "none",
+                    userId: userId || "guest",
+                    contentLength: fullContent.length
+                });
+                break;
             }
         }
 
@@ -158,7 +174,11 @@ router.post("/", optionalAuth, async (req: Request, res: Response) => {
         }
 
         logChatEvent("stream_complete", userId || null);
-        res.end();
+
+        // Only end the response if client is still connected
+        if (!clientDisconnected) {
+            res.end();
+        }
 
     } catch (error) {
         logger.error("[CHAT] Streaming error", { error });

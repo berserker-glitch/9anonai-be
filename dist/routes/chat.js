@@ -27,10 +27,13 @@ const ChatSchema = zod_1.z.object({
         data: zod_1.z.string(), // base64 encoded
         mimeType: zod_1.z.string(),
     })).optional(),
+    /** Chat ID for message persistence */
+    chatId: zod_1.z.string().optional(),
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // Routes
 // ─────────────────────────────────────────────────────────────────────────────
+const prisma_1 = require("../services/prisma");
 /**
  * POST /api/chat
  * Streams AI legal advice response using Server-Sent Events (SSE).
@@ -41,6 +44,7 @@ const ChatSchema = zod_1.z.object({
  * @param {string} req.body.message - User's question or message
  * @param {Array} [req.body.history] - Previous messages for context
  * @param {Array} [req.body.images] - Image attachments (base64)
+ * @param {string} [req.body.chatId] - Chat ID to save the response to
  * @returns {stream} SSE stream with AI response tokens and metadata
  */
 router.post("/", auth_1.optionalAuth, async (req, res) => {
@@ -49,19 +53,94 @@ router.post("/", auth_1.optionalAuth, async (req, res) => {
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     try {
-        const { message, history, images } = ChatSchema.parse(req.body);
+        const { message, history, images, chatId } = ChatSchema.parse(req.body);
         const userId = req.userId;
+        console.log(`[CHAT] Incoming | UserId: ${userId || 'guest'} | ChatId: ${chatId || 'none'} | Msg: ${message.substring(0, 30)}...`);
         // Log chat event
         (0, logger_1.logChatEvent)("stream_start", userId || null, {
             messageLength: message.length,
             historyLength: history?.length || 0,
-            imageCount: images?.length || 0
+            imageCount: images?.length || 0,
+            chatId: chatId || "none"
         });
         // Start streaming response
         const stream = (0, lawyer_1.getLegalAdviceStream)(message, history || [], images || [], userId);
+        let fullContent = "";
+        let sources = [];
+        let contract = null;
         // Stream events to client
         for await (const event of stream) {
             res.write(`data: ${JSON.stringify(event)}\n\n`);
+            // Accumulate response data for persistence
+            if (event.type === "token") {
+                fullContent += event.content;
+            }
+            else if (event.type === "citation") {
+                sources = event.sources || [];
+            }
+            else if (event.type === "contract_generated") {
+                contract = event.document ? {
+                    title: event.document.title,
+                    path: event.document.id,
+                    type: event.document.type
+                } : null;
+            }
+        }
+        // Save completed message to database if chatId is provided
+        if (chatId && fullContent) {
+            try {
+                // If user is authenticated, verify chat ownership before saving
+                if (userId) {
+                    const chat = await prisma_1.prisma.chat.findFirst({
+                        where: { id: chatId, userId },
+                        select: { id: true }
+                    });
+                    if (chat) {
+                        const messageSources = sources.length > 0 ? JSON.stringify(sources) : null;
+                        await prisma_1.prisma.message.create({
+                            data: {
+                                role: "assistant",
+                                content: fullContent,
+                                sources: messageSources,
+                                attachmentUrl: contract ? contract.path : null,
+                                attachmentName: contract ? contract.title : null,
+                                chatId,
+                                isActive: true,
+                                version: 1
+                            }
+                        });
+                        // Update chat timestamp
+                        await prisma_1.prisma.chat.update({
+                            where: { id: chatId },
+                            data: { updatedAt: new Date() }
+                        });
+                        logger_1.logger.info(`[CHAT] Saved assistant response to chat ${chatId}`);
+                        console.log(`✅ [PERSISTENCE] Saved to chat ${chatId}`);
+                    }
+                    else {
+                        logger_1.logger.warn(`[CHAT] Skipped saving: Chat ${chatId} not found or mismatch for user ${userId}`);
+                        console.log(`⚠️ [PERSISTENCE] Chat ${chatId} not found or ownership mismatch for user ${userId}`);
+                    }
+                }
+                else {
+                    logger_1.logger.warn(`[CHAT] Skipped saving: User not authenticated for chat ${chatId}`);
+                    console.log(`⚠️ [PERSISTENCE] User not authenticated for chat ${chatId}`);
+                }
+            }
+            catch (dbError) {
+                logger_1.logger.error("[CHAT] Failed to save assistant message", {
+                    error: dbError instanceof Error ? dbError.message : String(dbError),
+                    chatId,
+                    userId
+                });
+                // We don't fail the request here since the stream was successful
+            }
+        }
+        else {
+            if (!chatId)
+                logger_1.logger.warn("[CHAT] Skipped saving: No chatId provided");
+            if (!fullContent)
+                logger_1.logger.warn("[CHAT] Skipped saving: No content generated");
         }
         (0, logger_1.logChatEvent)("stream_complete", userId || null);
         res.end();

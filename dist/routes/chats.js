@@ -258,12 +258,15 @@ router.post("/:id/messages", auth_1.authenticate, (0, error_handler_1.asyncHandl
             data: { isActive: false }
         });
     }
+    const sources = messageData.sources
+        ? (typeof messageData.sources === 'string' ? messageData.sources : JSON.stringify(messageData.sources))
+        : null;
     // Create new message
     const message = await prisma_1.prisma.message.create({
         data: {
             role: messageData.role,
             content: messageData.content,
-            sources: messageData.sources ? JSON.stringify(messageData.sources) : null,
+            sources: sources,
             attachmentUrl: messageData.attachmentUrl || null,
             attachmentName: messageData.attachmentName || null,
             parentId: messageData.parentId || undefined,
