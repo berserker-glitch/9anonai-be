@@ -97,6 +97,8 @@ Return the response as a JSON array of objects with this EXACT structure:
         let jsonStr = content.replace(/^```(json)?\s*/, "").replace(/\s*```$/, "");
         // Remove any leading/trailing whitespace
         jsonStr = jsonStr.trim();
+        // Remove trailing commas before closing braces/brackets to fix JSON parsing errors
+        jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
 
         const parsed = JSON.parse(jsonStr);
         return Array.isArray(parsed) ? parsed : (parsed.topics || []);
