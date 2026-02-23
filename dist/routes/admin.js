@@ -32,6 +32,7 @@ router.get("/users", auth_1.authenticate, auth_1.requireSuperAdmin, (0, error_ha
             name: true,
             role: true,
             createdAt: true,
+            marketingSource: true,
             _count: {
                 select: {
                     chats: true
@@ -39,6 +40,7 @@ router.get("/users", auth_1.authenticate, auth_1.requireSuperAdmin, (0, error_ha
             },
             chats: {
                 select: {
+                    updatedAt: true,
                     _count: {
                         select: {
                             messages: true
@@ -50,15 +52,27 @@ router.get("/users", auth_1.authenticate, auth_1.requireSuperAdmin, (0, error_ha
         orderBy: { createdAt: "desc" }
     });
     // Transform data to include aggregated stats
-    const usersWithStats = users.map(user => ({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        createdAt: user.createdAt,
-        conversationCount: user._count.chats,
-        messageCount: user.chats.reduce((total, chat) => total + chat._count.messages, 0)
-    }));
+    const usersWithStats = users.map(user => {
+        // Find the maximum updatedAt date from chats
+        let maxUpdatedAt = new Date(user.createdAt).getTime();
+        for (const chat of user.chats) {
+            const chatUpdatedTime = new Date(chat.updatedAt).getTime();
+            if (chatUpdatedTime > maxUpdatedAt) {
+                maxUpdatedAt = chatUpdatedTime;
+            }
+        }
+        return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            createdAt: user.createdAt,
+            marketingSource: user.marketingSource,
+            conversationCount: user._count.chats,
+            messageCount: user.chats.reduce((total, chat) => total + chat._count.messages, 0),
+            lastActive: new Date(maxUpdatedAt).toISOString()
+        };
+    });
     (0, logger_1.logDbOperation)("findMany", "User", true, `Retrieved ${users.length} users`);
     res.json({ users: usersWithStats });
 }));

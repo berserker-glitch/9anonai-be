@@ -68,10 +68,12 @@ router.post("/", auth_1.optionalAuth, async (req, res) => {
         let fullContent = "";
         let sources = [];
         let contract = null;
+        let clientDisconnected = false;
         // Stream events to client
+        // NOTE: Accumulate content BEFORE writing to client —
+        // ensures data is captured even if client disconnects mid-stream
         for await (const event of stream) {
-            res.write(`data: ${JSON.stringify(event)}\n\n`);
-            // Accumulate response data for persistence
+            // Accumulate response data for persistence FIRST
             if (event.type === "token") {
                 fullContent += event.content;
             }
@@ -84,6 +86,21 @@ router.post("/", auth_1.optionalAuth, async (req, res) => {
                     path: event.document.id,
                     type: event.document.type
                 } : null;
+            }
+            // Write to client — wrapped to handle disconnect gracefully
+            try {
+                res.write(`data: ${JSON.stringify(event)}\n\n`);
+            }
+            catch (writeError) {
+                // Client/proxy closed the connection mid-stream
+                // Break the loop but still proceed to save accumulated content
+                clientDisconnected = true;
+                logger_1.logger.warn(`[CHAT] Client disconnected mid-stream`, {
+                    chatId: chatId || "none",
+                    userId: userId || "guest",
+                    contentLength: fullContent.length
+                });
+                break;
             }
         }
         // Save completed message to database if chatId is provided
@@ -143,7 +160,10 @@ router.post("/", auth_1.optionalAuth, async (req, res) => {
                 logger_1.logger.warn("[CHAT] Skipped saving: No content generated");
         }
         (0, logger_1.logChatEvent)("stream_complete", userId || null);
-        res.end();
+        // Only end the response if client is still connected
+        if (!clientDisconnected) {
+            res.end();
+        }
     }
     catch (error) {
         logger_1.logger.error("[CHAT] Streaming error", { error });

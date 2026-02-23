@@ -43,6 +43,7 @@ router.get("/users", authenticate, requireSuperAdmin, asyncHandler(async (req: R
             },
             chats: {
                 select: {
+                    updatedAt: true,
                     _count: {
                         select: {
                             messages: true
@@ -55,16 +56,28 @@ router.get("/users", authenticate, requireSuperAdmin, asyncHandler(async (req: R
     });
 
     // Transform data to include aggregated stats
-    const usersWithStats = users.map(user => ({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        createdAt: user.createdAt,
-        marketingSource: user.marketingSource,
-        conversationCount: user._count.chats,
-        messageCount: user.chats.reduce((total, chat) => total + chat._count.messages, 0)
-    }));
+    const usersWithStats = users.map(user => {
+        // Find the maximum updatedAt date from chats
+        let maxUpdatedAt = new Date(user.createdAt).getTime();
+        for (const chat of user.chats) {
+            const chatUpdatedTime = new Date(chat.updatedAt).getTime();
+            if (chatUpdatedTime > maxUpdatedAt) {
+                maxUpdatedAt = chatUpdatedTime;
+            }
+        }
+
+        return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            createdAt: user.createdAt,
+            marketingSource: user.marketingSource,
+            conversationCount: user._count.chats,
+            messageCount: user.chats.reduce((total, chat) => total + chat._count.messages, 0),
+            lastActive: new Date(maxUpdatedAt).toISOString()
+        };
+    });
 
     logDbOperation("findMany", "User", true, `Retrieved ${users.length} users`);
     res.json({ users: usersWithStats });
