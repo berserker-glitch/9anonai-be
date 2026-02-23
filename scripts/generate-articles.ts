@@ -15,6 +15,7 @@ dotenv.config();
 import OpenAI from "openai";
 import * as fs from "fs";
 import * as path from "path";
+import { execSync } from "child_process";
 import { getTable } from "../src/services/db";
 import { getEmbedding } from "../src/services/bi";
 
@@ -390,6 +391,30 @@ async function main(): Promise<void> {
                 saveBlog(blog, language, outputDir);
                 successCount++;
 
+                /**
+                 * Auto-commit the newly generated blog to Git.
+                 * Executes git add and commit within the FE directory.
+                 */
+                try {
+                    const feDir = path.resolve(__dirname, "..", "..", "FE");
+                    const filename = `${blog.slug}${language.suffix}.md`;
+                    // Using forward slashes for relative path within FE directory
+                    const relPath = `content/blogs/${filename}`;
+
+                    // Add the specific newly created blog file
+                    execSync(`git add "${relPath}"`, { cwd: feDir });
+
+                    // Map language code to the format required by the user (eng, fr, ar)
+                    const langStr = language.code === 'en' ? 'eng' : (language.code === 'fr' ? 'fr' : 'ar');
+                    const safeSlug = blog.slug.replace(/"/g, '\\"');
+
+                    // Commit with the required message format
+                    execSync(`git commit -m "feat(blog): added blog ${safeSlug} in ${langStr}"`, { cwd: feDir, stdio: 'pipe' });
+                    console.log(`      🚀 Git committed: ${filename}`);
+                } catch (gitError) {
+                    console.warn(`      ⚠️ Git commit skipped or failed for ${blog.slug} (might be unchanged)`);
+                }
+
                 // Add a small delay between API calls to avoid rate limiting
                 await new Promise(resolve => setTimeout(resolve, 1500));
             } catch (error) {
@@ -417,6 +442,19 @@ async function main(): Promise<void> {
     }
     console.log(`⏱️  Total time: ${duration} minutes`);
     console.log(`📁 Blogs saved to: ${outputDir}`);
+
+    /**
+     * Final Git operation: push the committed generated blogs to the repository.
+     * Operates from the FE directory contexts.
+     */
+    try {
+        console.log(`\n☁️  Pushing to git repository...`);
+        const feDir = path.resolve(__dirname, "..", "..", "FE");
+        execSync(`git push`, { cwd: feDir, stdio: 'inherit' });
+        console.log(`   ✅ Successfully pushed all generated blogs.`);
+    } catch (pushError) {
+        console.error(`   ❌ Failed to push to git repository:`, pushError);
+    }
 }
 
 // Execute the main function
