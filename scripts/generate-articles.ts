@@ -403,7 +403,9 @@ async function main(): Promise<void> {
             // The OpenRouter Gemini image model returns an image URL in the content
             const rawContent = imageResponse.choices[0]?.message?.content || "";
             // Find url in response like: markdown image ![alt](url) or just url
-            const match = rawContent.match(new RegExp("!\\\\[.*?\\\\\\]\\\\((.*?)\\\\)")) || rawContent.match(/https:\\/\\/\\S+/);
+            const mdImageRegex = /!\\[[^\\]]*\\]\\(([^)]+)\\)/;
+            const urlRegex = /https?:\\/\\/[^\\s)]+/;
+            const match = rawContent.match(mdImageRegex) || rawContent.match(urlRegex);
             const generatedImageUrl = match ? match[1] || match[0] : "";
 
             if (generatedImageUrl) {
