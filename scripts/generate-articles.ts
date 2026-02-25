@@ -18,6 +18,7 @@ import * as path from "path";
 import { execSync } from "child_process";
 import { getTable } from "../src/services/db";
 import { getEmbedding } from "../src/services/bi";
+import sharp from "sharp";
 
 
 // Configure OpenAI client with OpenRouter
@@ -127,6 +128,7 @@ interface GeneratedBlog {
     title: string;
     description: string;
     content: string;
+    image: string;
     sources: string[];
     generatedAt: Date;
 }
@@ -202,6 +204,7 @@ interface BlogTopic {
  * @param context - RAG context (legal references)
  * @param topicIndex - Topic number (1-8)
  * @param langIndex - Language index (0-2)
+ * @param imageUrl - URL of the generated image
  * @returns Generated blog object
  */
 async function generateBlogInLanguage(
@@ -209,7 +212,8 @@ async function generateBlogInLanguage(
     language: typeof LANGUAGES[0],
     context: string,
     topicIndex: number,
-    langIndex: number
+    langIndex: number,
+    imageUrl: string
 ): Promise<GeneratedBlog> {
     console.log(`      🌐 [${language.name}] Generating...`);
 
@@ -292,6 +296,7 @@ Use your knowledge of Moroccan legal frameworks and cite specific laws where app
         title: topic.titles[language.code as keyof typeof topic.titles],
         description: topic.descriptions[language.code as keyof typeof topic.descriptions],
         content: content,
+        image: imageUrl,
         sources: [],
         generatedAt: new Date()
     };
@@ -313,6 +318,7 @@ function saveBlog(blog: GeneratedBlog, language: typeof LANGUAGES[0], outputDir:
 title: "${blog.title}"
 date: "${blog.generatedAt.toISOString().split("T")[0]}"
 description: "${blog.description}"
+image: "${blog.image}"
 ---
 
 `;
@@ -383,12 +389,58 @@ async function main(): Promise<void> {
         // Build context from RAG results
         const context = buildContext(sources);
 
+        // Step 1.5: Generate image using Gemini Pro Image
+        console.log(`   🎨 Generating image for topic...`);
+        let imageUrl = "";
+        try {
+            const imageResponse = await client.chat.completions.create({
+                model: "google/gemini-3-pro-image-preview",
+                messages: [
+                    { role: "user", content: `Professional illustration for a blog article about: "${topic.titles.en}". Clean, modern style.` }
+                ]
+            });
+
+            // The OpenRouter Gemini image model returns an image URL in the content
+            const rawContent = imageResponse.choices[0]?.message?.content || "";
+            // Find url in response like: markdown image ![alt](url) or just url
+            const match = rawContent.match(new RegExp("!\\\\[.*?\\\\\\]\\\\((.*?)\\\\)")) || rawContent.match(/https:\\/\\/\\S+/);
+            const generatedImageUrl = match ? match[1] || match[0] : "";
+
+            if (generatedImageUrl) {
+                // Download and composite logo
+                const logoPath = path.resolve(__dirname, "..", "..", "FE", "public", "9anon-logo.png");
+                const imageBuffer = await fetch(generatedImageUrl).then(r => r.arrayBuffer());
+
+                const imagesDir = path.resolve(__dirname, "..", "..", "FE", "public", "blog-images");
+                if (!fs.existsSync(imagesDir)) {
+                    fs.mkdirSync(imagesDir, { recursive: true });
+                }
+
+                const finalImagePath = path.join(imagesDir, `${topic.slug}.png`);
+
+                // Composite the logo using sharp
+                await sharp(Buffer.from(imageBuffer))
+                    .composite([{
+                        input: logoPath,
+                        gravity: 'southwest',
+                    }])
+                    .toFile(finalImagePath);
+
+                imageUrl = `/blog-images/${topic.slug}.png`;
+                console.log(`   ✅ Image saved to ${imageUrl}`);
+            } else {
+                console.warn(`   ⚠️ Failed to extract image URL from response: ${rawContent.slice(0, 100)}...`);
+            }
+        } catch (imageErr) {
+            console.error(`   ❌ Failed to generate/composite image:`, imageErr);
+        }
+
         // Step 2: Generate in all 3 languages
         for (let langIdx = 0; langIdx < LANGUAGES.length; langIdx++) {
             const language = LANGUAGES[langIdx];
 
             try {
-                const blog = await generateBlogInLanguage(topic, language, context, topicIdx + 1, langIdx);
+                const blog = await generateBlogInLanguage(topic, language, context, topicIdx + 1, langIdx, imageUrl);
                 blog.sources = sources.map(s => s.document_name || s.source_file || "Unknown");
                 saveBlog(blog, language, outputDir);
                 successCount++;
