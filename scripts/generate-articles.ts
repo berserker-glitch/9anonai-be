@@ -393,45 +393,96 @@ async function main(): Promise<void> {
         console.log(`   🎨 Generating image for topic...`);
         let imageUrl = "";
         try {
+            /**
+             * Generate a professional blog illustration using Gemini's image model.
+             * The prompt is tailored to produce a clean, modern image that matches
+             * the blog topic. We request an image without text to avoid legibility issues.
+             */
+            const imagePrompt = [
+                `Generate a professional, high-quality illustration for a legal blog article titled: "${topic.titles.en}".`,
+                `Style: Clean, modern, minimalist. Use a professional color palette with blues, greens, and neutral tones.`,
+                `The image should represent the legal concept visually without any text or words in the image.`,
+                `Think: editorial illustration for a premium legal publication.`,
+            ].join(" ");
+
             const imageResponse = await client.chat.completions.create({
                 model: "google/gemini-3-pro-image-preview",
                 messages: [
-                    { role: "user", content: `Professional illustration for a blog article about: "${topic.titles.en}". Clean, modern style.` }
+                    { role: "user", content: imagePrompt }
                 ]
             });
 
-            // The OpenRouter Gemini image model returns an image URL in the content
+            // Gemini image model can return data in different formats:
+            // 1. Base64 data URI: data:image/png;base64,<data>
+            // 2. Raw base64 string
+            // 3. Markdown image with URL: ![alt](url)
+            // 4. Plain URL
             const rawContent = imageResponse.choices[0]?.message?.content || "";
-            // Find url in response like: markdown image ![alt](url) or just url
-            const mdImageRegex = /!\\[[^\\]]*\\]\\(([^)]+)\\)/;
-            const urlRegex = /https?:\\/\\/[^\\s)]+/;
-            const match = rawContent.match(mdImageRegex) || rawContent.match(urlRegex);
-            const generatedImageUrl = match ? match[1] || match[0] : "";
+            console.log(`   📦 Response length: ${rawContent.length} chars, first 80: ${rawContent.slice(0, 80)}...`);
 
-            if (generatedImageUrl) {
-                // Download and composite logo
-                const logoPath = path.resolve(__dirname, "..", "..", "FE", "public", "9anon-logo.png");
-                const imageBuffer = await fetch(generatedImageUrl).then(r => r.arrayBuffer());
+            let imageBuffer: Buffer | null = null;
 
+            // Case 1: Check for base64 data URI (data:image/...)
+            const dataUriMatch = rawContent.match(/data:image\/[a-zA-Z]+;base64,([A-Za-z0-9+/=\s]+)/);
+            if (dataUriMatch) {
+                console.log(`   📸 Found base64 data URI`);
+                imageBuffer = Buffer.from(dataUriMatch[1].replace(/\s/g, ""), "base64");
+            }
+
+            // Case 2: If the entire response looks like raw base64 (long string, no spaces/markdown)
+            if (!imageBuffer && rawContent.length > 500 && !rawContent.includes(" ") && !rawContent.includes("#")) {
+                console.log(`   📸 Response looks like raw base64 data`);
+                imageBuffer = Buffer.from(rawContent.trim(), "base64");
+            }
+
+            // Case 3: Markdown image ![alt](url) or plain https:// URL
+            if (!imageBuffer) {
+                const mdMatch = rawContent.match(/!\[.*?\]\(([^)]+)\)/);
+                const urlMatch = rawContent.match(/https?:\/\/[^\s)]+/);
+                const extractedUrl = mdMatch ? mdMatch[1] : urlMatch ? urlMatch[0] : "";
+
+                if (extractedUrl) {
+                    console.log(`   🔗 Found image URL: ${extractedUrl.slice(0, 80)}...`);
+                    const fetchRes = await fetch(extractedUrl);
+                    imageBuffer = Buffer.from(await fetchRes.arrayBuffer());
+                }
+            }
+
+            if (imageBuffer && imageBuffer.length > 100) {
+                // Ensure the output directory exists
                 const imagesDir = path.resolve(__dirname, "..", "..", "FE", "public", "blog-images");
                 if (!fs.existsSync(imagesDir)) {
                     fs.mkdirSync(imagesDir, { recursive: true });
                 }
 
                 const finalImagePath = path.join(imagesDir, `${topic.slug}.png`);
+                const logoPath = path.resolve(__dirname, "..", "..", "FE", "public", "9anon-logo.png");
 
-                // Composite the logo using sharp
-                await sharp(Buffer.from(imageBuffer))
+                /**
+                 * Composite the 9anon logo onto the bottom-left corner of the generated image.
+                 * We resize the logo to a reasonable size relative to the image width.
+                 */
+                const mainImage = sharp(imageBuffer);
+                const metadata = await mainImage.metadata();
+                const logoSize = Math.round((metadata.width || 800) * 0.15); // Logo = 15% of image width
+
+                const resizedLogo = await sharp(logoPath)
+                    .resize(logoSize)
+                    .toBuffer();
+
+                await sharp(imageBuffer)
                     .composite([{
-                        input: logoPath,
-                        gravity: 'southwest',
+                        input: resizedLogo,
+                        gravity: "southwest",
                     }])
+                    .png()
                     .toFile(finalImagePath);
 
                 imageUrl = `/blog-images/${topic.slug}.png`;
-                console.log(`   ✅ Image saved to ${imageUrl}`);
+                console.log(`   ✅ Image saved to ${imageUrl} (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
             } else {
-                console.warn(`   ⚠️ Failed to extract image URL from response: ${rawContent.slice(0, 100)}...`);
+                console.warn(`   ⚠️ Could not extract a valid image from the response.`);
+                console.warn(`   📝 Raw response preview: ${rawContent.slice(0, 200)}`);
             }
         } catch (imageErr) {
             console.error(`   ❌ Failed to generate/composite image:`, imageErr);
