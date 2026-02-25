@@ -389,14 +389,16 @@ async function main(): Promise<void> {
         // Build context from RAG results
         const context = buildContext(sources);
 
-        // Step 1.5: Generate image using Gemini Pro Image
+        // Step 1.5: Generate image using Gemini Pro Image via raw OpenRouter API
+        // We use fetch directly because the OpenAI SDK strips multimodal image parts
         console.log(`   🎨 Generating image for topic...`);
         let imageUrl = "";
         try {
             /**
              * Generate a professional blog illustration using Gemini's image model.
-             * The prompt is tailored to produce a clean, modern image that matches
-             * the blog topic. We request an image without text to avoid legibility issues.
+             * We call OpenRouter directly via fetch because the OpenAI SDK's
+             * message.content only captures text — Gemini returns images as
+             * multimodal parts (inline_data) which the SDK discards.
              */
             const imagePrompt = [
                 `Generate a professional, high-quality illustration for a legal blog article titled: "${topic.titles.en}".`,
@@ -405,51 +407,91 @@ async function main(): Promise<void> {
                 `Think: editorial illustration for a premium legal publication.`,
             ].join(" ");
 
-            const imageResponse = await client.chat.completions.create({
-                model: "google/gemini-3-pro-image-preview",
-                messages: [
-                    { role: "user", content: imagePrompt }
-                ]
+            const rawResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                    "HTTP-Referer": "https://github.com/moroccan-legal-ai",
+                    "X-Title": "9anon - Blog Image Generator",
+                },
+                body: JSON.stringify({
+                    model: "google/gemini-3-pro-image-preview",
+                    messages: [
+                        { role: "user", content: imagePrompt }
+                    ],
+                }),
             });
 
-            // Gemini image model can return data in different formats:
-            // 1. Base64 data URI: data:image/png;base64,<data>
-            // 2. Raw base64 string
-            // 3. Markdown image with URL: ![alt](url)
-            // 4. Plain URL
-            const rawContent = imageResponse.choices[0]?.message?.content || "";
-            console.log(`   📦 Response length: ${rawContent.length} chars, first 80: ${rawContent.slice(0, 80)}...`);
+            const responseJson = await rawResponse.json() as any;
+
+            // Debug: log the response structure to understand the format
+            const messageObj = responseJson?.choices?.[0]?.message;
+            console.log(`   📦 Response keys: ${JSON.stringify(Object.keys(responseJson?.choices?.[0] || {}))}`);
+            console.log(`   📦 Message keys: ${JSON.stringify(Object.keys(messageObj || {}))}`);
 
             let imageBuffer: Buffer | null = null;
 
-            // Case 1: Check for base64 data URI (data:image/...)
-            const dataUriMatch = rawContent.match(/data:image\/[a-zA-Z]+;base64,([A-Za-z0-9+/=\s]+)/);
-            if (dataUriMatch) {
-                console.log(`   📸 Found base64 data URI`);
-                imageBuffer = Buffer.from(dataUriMatch[1].replace(/\s/g, ""), "base64");
+            // Format 1: OpenRouter multimodal content array
+            // content: [{type: "text", text: "..."}, {type: "image_url", image_url: {url: "data:image/png;base64,..."}}]
+            if (Array.isArray(messageObj?.content)) {
+                for (const part of messageObj.content) {
+                    // Check for image_url part with base64 data URI
+                    if (part.type === "image_url" && part.image_url?.url) {
+                        const dataMatch = part.image_url.url.match(/^data:image\/[^;]+;base64,(.+)/s);
+                        if (dataMatch) {
+                            console.log(`   📸 Found base64 in content array (image_url part)`);
+                            imageBuffer = Buffer.from(dataMatch[1], "base64");
+                            break;
+                        }
+                        // It's a regular URL, download it
+                        console.log(`   🔗 Found URL in content array: ${part.image_url.url.slice(0, 80)}...`);
+                        const dlRes = await fetch(part.image_url.url);
+                        imageBuffer = Buffer.from(await dlRes.arrayBuffer());
+                        break;
+                    }
+                    // Check for inline_data (Gemini native format sometimes passed through)
+                    if (part.inline_data?.data) {
+                        console.log(`   📸 Found inline_data part`);
+                        imageBuffer = Buffer.from(part.inline_data.data, "base64");
+                        break;
+                    }
+                }
             }
 
-            // Case 2: If the entire response looks like raw base64 (long string, no spaces/markdown)
-            if (!imageBuffer && rawContent.length > 500 && !rawContent.includes(" ") && !rawContent.includes("#")) {
-                console.log(`   📸 Response looks like raw base64 data`);
-                imageBuffer = Buffer.from(rawContent.trim(), "base64");
-            }
+            // Format 2: content is a plain string (text with possible base64 or URL)
+            if (!imageBuffer && typeof messageObj?.content === "string" && messageObj.content.length > 0) {
+                const textContent = messageObj.content;
+                console.log(`   📦 Text content length: ${textContent.length}, preview: ${textContent.slice(0, 100)}...`);
 
-            // Case 3: Markdown image ![alt](url) or plain https:// URL
-            if (!imageBuffer) {
-                const mdMatch = rawContent.match(/!\[.*?\]\(([^)]+)\)/);
-                const urlMatch = rawContent.match(/https?:\/\/[^\s)]+/);
-                const extractedUrl = mdMatch ? mdMatch[1] : urlMatch ? urlMatch[0] : "";
+                // Check for data URI in the text
+                const dataUriMatch = textContent.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=\s]+)/);
+                if (dataUriMatch) {
+                    console.log(`   📸 Found data URI in text content`);
+                    imageBuffer = Buffer.from(dataUriMatch[1].replace(/\s/g, ""), "base64");
+                }
 
-                if (extractedUrl) {
-                    console.log(`   🔗 Found image URL: ${extractedUrl.slice(0, 80)}...`);
-                    const fetchRes = await fetch(extractedUrl);
-                    imageBuffer = Buffer.from(await fetchRes.arrayBuffer());
+                // Check for raw base64 (long string with no spaces)
+                if (!imageBuffer && textContent.length > 500 && !textContent.includes(" ")) {
+                    console.log(`   📸 Text looks like raw base64`);
+                    imageBuffer = Buffer.from(textContent.trim(), "base64");
+                }
+
+                // Check for URL
+                if (!imageBuffer) {
+                    const mdMatch = textContent.match(/!\[.*?\]\(([^)]+)\)/);
+                    const urlMatch = textContent.match(/https?:\/\/[^\s)]+/);
+                    const url = mdMatch ? mdMatch[1] : urlMatch ? urlMatch[0] : "";
+                    if (url) {
+                        console.log(`   🔗 Found URL in text: ${url.slice(0, 80)}...`);
+                        const dlRes = await fetch(url);
+                        imageBuffer = Buffer.from(await dlRes.arrayBuffer());
+                    }
                 }
             }
 
             if (imageBuffer && imageBuffer.length > 100) {
-                // Ensure the output directory exists
+                // Ensure output directory exists
                 const imagesDir = path.resolve(__dirname, "..", "..", "FE", "public", "blog-images");
                 if (!fs.existsSync(imagesDir)) {
                     fs.mkdirSync(imagesDir, { recursive: true });
@@ -459,12 +501,12 @@ async function main(): Promise<void> {
                 const logoPath = path.resolve(__dirname, "..", "..", "FE", "public", "9anon-logo.png");
 
                 /**
-                 * Composite the 9anon logo onto the bottom-left corner of the generated image.
-                 * We resize the logo to a reasonable size relative to the image width.
+                 * Composite the 9anon logo onto the bottom-left corner.
+                 * Logo is resized to 15% of the image width for a subtle watermark.
                  */
                 const mainImage = sharp(imageBuffer);
                 const metadata = await mainImage.metadata();
-                const logoSize = Math.round((metadata.width || 800) * 0.15); // Logo = 15% of image width
+                const logoSize = Math.round((metadata.width || 800) * 0.15);
 
                 const resizedLogo = await sharp(logoPath)
                     .resize(logoSize)
@@ -482,7 +524,8 @@ async function main(): Promise<void> {
                 console.log(`   ✅ Image saved to ${imageUrl} (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
             } else {
                 console.warn(`   ⚠️ Could not extract a valid image from the response.`);
-                console.warn(`   📝 Raw response preview: ${rawContent.slice(0, 200)}`);
+                // Log the full structure for debugging
+                console.warn(`   📝 Full response structure:`, JSON.stringify(responseJson?.choices?.[0]?.message || {}).slice(0, 500));
             }
         } catch (imageErr) {
             console.error(`   ❌ Failed to generate/composite image:`, imageErr);
