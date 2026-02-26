@@ -528,17 +528,20 @@ async function main(): Promise<void> {
 
                 /**
                  * Composite the 9anon logo onto the bottom-left corner.
-                 * Logo is resized to 10% of image width, with 20px padding from edges.
+                 * Logo is resized to 6% of image width, with 40% opacity and 20px padding.
                  */
                 const mainImage = sharp(imageBuffer);
                 const metadata = await mainImage.metadata();
                 const imgWidth = metadata.width || 800;
                 const imgHeight = metadata.height || 600;
-                const logoSize = Math.round(imgWidth * 0.10); // 10% of image width
+                const logoSize = Math.round(imgWidth * 0.06); // 6% of image width — small watermark
                 const padding = 20; // px padding from bottom-left edges
 
+                // Resize logo and lower opacity to 40%
                 const resizedLogo = await sharp(logoPath)
                     .resize(logoSize)
+                    .ensureAlpha()
+                    .linear(0.4, 0) // Scale all channels including alpha by 0.4 for 40% opacity
                     .toBuffer();
 
                 // Get resized logo dimensions for precise placement
