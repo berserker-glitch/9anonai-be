@@ -432,9 +432,35 @@ async function main(): Promise<void> {
 
             let imageBuffer: Buffer | null = null;
 
+            // Format 0: OpenRouter returns Gemini images in a dedicated "images" field
+            // messageObj.images is an array of base64-encoded image strings or data URIs
+            if (messageObj?.images && Array.isArray(messageObj.images) && messageObj.images.length > 0) {
+                const imgData = messageObj.images[0];
+                console.log(`   📸 Found image in message.images field (${typeof imgData}, length: ${String(imgData).length})`);
+
+                if (typeof imgData === "string") {
+                    // Could be a data URI or raw base64
+                    const dataUriMatch = imgData.match(/^data:image\/[^;]+;base64,(.+)/s);
+                    if (dataUriMatch) {
+                        imageBuffer = Buffer.from(dataUriMatch[1], "base64");
+                    } else if (imgData.length > 100) {
+                        // Assume raw base64
+                        imageBuffer = Buffer.from(imgData, "base64");
+                    }
+                } else if (typeof imgData === "object" && imgData.b64_json) {
+                    // Some APIs return {b64_json: "...", revised_prompt: "..."}
+                    imageBuffer = Buffer.from(imgData.b64_json, "base64");
+                } else if (typeof imgData === "object" && imgData.url) {
+                    // Or {url: "https://..."}
+                    console.log(`   🔗 Downloading image from images[0].url...`);
+                    const dlRes = await fetch(imgData.url);
+                    imageBuffer = Buffer.from(await dlRes.arrayBuffer());
+                }
+            }
+
             // Format 1: OpenRouter multimodal content array
             // content: [{type: "text", text: "..."}, {type: "image_url", image_url: {url: "data:image/png;base64,..."}}]
-            if (Array.isArray(messageObj?.content)) {
+            if (!imageBuffer && Array.isArray(messageObj?.content)) {
                 for (const part of messageObj.content) {
                     // Check for image_url part with base64 data URI
                     if (part.type === "image_url" && part.image_url?.url) {
