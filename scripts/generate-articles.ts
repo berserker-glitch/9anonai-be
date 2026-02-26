@@ -401,10 +401,12 @@ async function main(): Promise<void> {
              * multimodal parts (inline_data) which the SDK discards.
              */
             const imagePrompt = [
-                `Generate a professional, high-quality illustration for a legal blog article titled: "${topic.titles.en}".`,
-                `Style: Clean, modern, minimalist. Use a professional color palette with blues, greens, and neutral tones.`,
-                `The image should represent the legal concept visually without any text or words in the image.`,
-                `Think: editorial illustration for a premium legal publication.`,
+                `Generate a realistic, high-quality photo-style image for a blog article titled: "${topic.titles.en}".`,
+                `Style: Semi-realistic stock photography look. Think Shutterstock or Getty Images editorial photos.`,
+                `Show real-world scenes related to the topic — people in professional settings, offices, courtrooms, documents, cityscapes, or relevant environments.`,
+                `Use natural lighting, professional composition, and a warm professional color palette.`,
+                `Do NOT include any text, words, watermarks, or logos in the image.`,
+                `The image should look like a premium editorial photograph, not an abstract illustration.`,
             ].join(" ");
 
             const rawResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -522,24 +524,32 @@ async function main(): Promise<void> {
                 }
 
                 const finalImagePath = path.join(imagesDir, `${topic.slug}.png`);
-                const logoPath = path.resolve(__dirname, "..", "..", "FE", "public", "9anon-logo.png");
+                const logoPath = path.resolve(__dirname, "..", "..", "FE", "public", "Layer 3.png");
 
                 /**
                  * Composite the 9anon logo onto the bottom-left corner.
-                 * Logo is resized to 15% of the image width for a subtle watermark.
+                 * Logo is resized to 10% of image width, with 20px padding from edges.
                  */
                 const mainImage = sharp(imageBuffer);
                 const metadata = await mainImage.metadata();
-                const logoSize = Math.round((metadata.width || 800) * 0.15);
+                const imgWidth = metadata.width || 800;
+                const imgHeight = metadata.height || 600;
+                const logoSize = Math.round(imgWidth * 0.10); // 10% of image width
+                const padding = 20; // px padding from bottom-left edges
 
                 const resizedLogo = await sharp(logoPath)
                     .resize(logoSize)
                     .toBuffer();
 
+                // Get resized logo dimensions for precise placement
+                const logoMeta = await sharp(resizedLogo).metadata();
+                const logoHeight = logoMeta.height || logoSize;
+
                 await sharp(imageBuffer)
                     .composite([{
                         input: resizedLogo,
-                        gravity: "southwest",
+                        left: padding,
+                        top: imgHeight - logoHeight - padding,
                     }])
                     .png()
                     .toFile(finalImagePath);
