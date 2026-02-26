@@ -420,6 +420,7 @@ async function main(): Promise<void> {
                     messages: [
                         { role: "user", content: imagePrompt }
                     ],
+                    modalities: ["image", "text"],
                 }),
             });
 
@@ -432,29 +433,26 @@ async function main(): Promise<void> {
 
             let imageBuffer: Buffer | null = null;
 
-            // Format 0: OpenRouter returns Gemini images in a dedicated "images" field
-            // messageObj.images is an array of base64-encoded image strings or data URIs
+            // OpenRouter returns Gemini images in message.images array
+            // Each image object has: { image_url: { url: "data:image/png;base64,..." } }
             if (messageObj?.images && Array.isArray(messageObj.images) && messageObj.images.length > 0) {
-                const imgData = messageObj.images[0];
-                console.log(`   📸 Found image in message.images field (${typeof imgData}, length: ${String(imgData).length})`);
+                const imgObj = messageObj.images[0];
+                const imageDataUrl = imgObj?.image_url?.url;
 
-                if (typeof imgData === "string") {
-                    // Could be a data URI or raw base64
-                    const dataUriMatch = imgData.match(/^data:image\/[^;]+;base64,(.+)/s);
-                    if (dataUriMatch) {
-                        imageBuffer = Buffer.from(dataUriMatch[1], "base64");
-                    } else if (imgData.length > 100) {
-                        // Assume raw base64
-                        imageBuffer = Buffer.from(imgData, "base64");
+                if (imageDataUrl) {
+                    console.log(`   📸 Found image data URL (length: ${imageDataUrl.length})`);
+                    // Extract base64 from data URI
+                    const dataMatch = imageDataUrl.match(/^data:image\/[^;]+;base64,(.+)/s);
+                    if (dataMatch) {
+                        imageBuffer = Buffer.from(dataMatch[1], "base64");
+                    } else if (imageDataUrl.startsWith("http")) {
+                        // It's a regular URL, download it
+                        console.log(`   🔗 Downloading image from URL...`);
+                        const dlRes = await fetch(imageDataUrl);
+                        imageBuffer = Buffer.from(await dlRes.arrayBuffer());
                     }
-                } else if (typeof imgData === "object" && imgData.b64_json) {
-                    // Some APIs return {b64_json: "...", revised_prompt: "..."}
-                    imageBuffer = Buffer.from(imgData.b64_json, "base64");
-                } else if (typeof imgData === "object" && imgData.url) {
-                    // Or {url: "https://..."}
-                    console.log(`   🔗 Downloading image from images[0].url...`);
-                    const dlRes = await fetch(imgData.url);
-                    imageBuffer = Buffer.from(await dlRes.arrayBuffer());
+                } else {
+                    console.warn(`   ⚠️ images[0] structure:`, JSON.stringify(imgObj).slice(0, 300));
                 }
             }
 
