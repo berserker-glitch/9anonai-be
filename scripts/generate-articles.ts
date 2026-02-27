@@ -32,6 +32,20 @@ const client = new OpenAI({
 });
 
 /**
+ * Dedicated client for Perplexity sonar-pro search.
+ * Uses the same OpenRouter base but needs its own instance so we can
+ * pass a different X-Title for tracking if needed.
+ */
+const perplexityClient = new OpenAI({
+    baseURL: "https://openrouter.ai/api/v1",
+    apiKey: process.env.OPENROUTER_API_KEY,
+    defaultHeaders: {
+        "HTTP-Referer": "https://9anonai.com",
+        "X-Title": "9anon - Trend Research",
+    },
+});
+
+/**
  * Blog topics to generate - covering different areas of Moroccan law
  * Each topic includes a slug, titles in 3 languages, and keywords for RAG search
  */
@@ -54,19 +68,124 @@ function getExistingSlugs(outputDir: string): Set<string> {
 }
 
 /**
- * Generate NEW topics using LLM that don't exist in the current set
+ * Step 1 of the topic pipeline: search for trending Moroccan law topics.
+ *
+ * Uses `perplexity/sonar-pro` via OpenRouter — this model performs live
+ * web searches and returns grounded results with real citations.
+ * The goal is to find what Moroccans are actually searching about their
+ * laws RIGHT NOW, so our blogs target real search demand.
+ *
+ * @param count - How many trend clusters to discover
+ * @returns A rich text summary of trending legal topics with citations
  */
-async function generateNewTopics(existingSlugs: Set<string>, count: number = 3): Promise<any[]> {
+async function searchTrendingTopics(count: number = 8): Promise<string> {
+    console.log(`   🔎 Querying Perplexity sonar-pro for trending Moroccan law searches...`);
+
+    const searchPrompt = `You are a legal content researcher. Search the web comprehensively to find:
+
+1. What legal topics are Moroccans actively searching for right now?
+2. What new Moroccan laws, reforms, or legal changes have been announced or discussed recently?
+3. What legal problems or questions are most commonly asked in Morocco?
+
+Search across:
+- Moroccan news sites (Hespress, Le360, Médio24, Yabiladi, 2M, TelQuel)
+- Legal forums and Q&A sites in Arabic and French
+- Moroccan government announcements (legislation, royal decrees)
+- Social media trending topics related to law in Morocco
+- Google Trends data for Morocco law-related searches
+
+Focus on these legal domains:
+- Family law (Moudawana reforms, divorce, custody, inheritance)
+- Labor law (Code du Travail reforms, wages, strikes, remote work)
+- Criminal law (penal code reforms, cybercrime, drug laws)
+- Real estate and property law
+- Business and commercial law (company formation, taxes)
+- Digital law (data protection, e-commerce, crypto)
+- Immigration and nationality
+- Consumer rights
+
+Return a detailed report of at least ${count} distinct trending topics, including:
+- The topic name and why it's trending
+- What specific questions people are asking
+- Any recent legislative changes driving the interest
+- Relevant search terms in Arabic and French
+
+Be specific and data-driven. Cite your sources.`;
+
+    try {
+        const response = await perplexityClient.chat.completions.create({
+            // perplexity/sonar-pro performs live web search via OpenRouter
+            model: "perplexity/sonar-pro",
+            messages: [
+                {
+                    role: "user",
+                    content: searchPrompt,
+                }
+            ],
+            // sonar-pro supports up to 8k output — we want detailed results
+            max_tokens: 4000,
+        });
+
+        const result = response.choices[0]?.message?.content || "";
+        console.log(`   ✅ Perplexity returned ${result.length} chars of trend data`);
+
+        // Log citations if available (Perplexity returns these in non-standard fields)
+        const rawResponse = response as any;
+        const citations: string[] = rawResponse?.citations || [];
+        if (citations.length > 0) {
+            console.log(`   📚 Citations: ${citations.slice(0, 5).join(", ")}${citations.length > 5 ? ` (+${citations.length - 5} more)` : ""}`);
+        }
+
+        return result;
+    } catch (error) {
+        console.error(`   ❌ Perplexity search failed:`, error);
+        // Fall back to empty string — generateNewTopics will handle it gracefully
+        return "";
+    }
+}
+
+/**
+ * Step 2 of the topic pipeline: synthesize search results into blog topics.
+ *
+ * Feeds the Perplexity trend report to Gemini which then picks the best
+ * angles for blog articles — ensuring every post we generate targets
+ * something people are actually searching for.
+ *
+ * @param existingSlugs - Slugs of already-published articles (to avoid duplication)
+ * @param count - Number of new topics to generate
+ * @returns Array of structured blog topic objects
+ */
+async function generateNewTopics(existingSlugs: Set<string>, count: number = 8): Promise<any[]> {
+    // --- Phase 1: Discover what people are searching for via Perplexity ---
+    const trendReport = await searchTrendingTopics(count);
+
     const existingList = Array.from(existingSlugs).join(", ");
 
-    const systemPrompt = `You are a content strategist for a Moroccan legal blog "9anon".
-Your goal is to suggest ${count} NEW, UNIQUE, and HIGH-VALUE blog topics about Moroccan law.
-You must NOT suggest topics that are already covered.
+    // --- Phase 2: Synthesize trend data into structured blog topics ---
+    const systemPrompt = `You are a content strategist for "9anon", Morocco's #1 AI legal platform.
 
-ALREADY COVERED TOPICS (DO NOT REPEAT):
+You have been given a live research report showing what Moroccans are currently searching for
+regarding their laws. Your job is to create ${count} NEW blog article topics based on this real
+search demand — topics that will rank on Google because people are actually looking for them.
+
+ALREADY PUBLISHED (DO NOT REPEAT THESE):
 ${existingList}
 
-Return the response as a JSON array of objects with this EXACT structure:
+${trendReport ? `LIVE TREND RESEARCH FROM THE WEB:
+---
+${trendReport}
+---
+
+Base your topics on the real search trends above.` : ""}
+
+RULES:
+- Each topic must address a real legal question Moroccans are searching for
+- Topics should be specific and actionable, not vague
+- Prefer topics where there is a recent law change or legal development driving interest
+- Mix individual-focused topics (citizen rights, family law) with business topics
+- The slug must be in English kebab-case and unique
+
+Return ONLY a valid JSON array with exactly this structure:
 [
   {
     "slug": "kebab-case-slug-in-english",
@@ -76,33 +195,41 @@ Return the response as a JSON array of objects with this EXACT structure:
       "fr": "French Title"
     },
     "descriptions": {
-      "ar": "Arabic Description",
-      "en": "English Description",
-      "fr": "French Description"
+      "ar": "Arabic Description (2 sentences)",
+      "en": "English Description (2 sentences)",
+      "fr": "French Description (2 sentences)"
     },
-    "searchQuery": "Arabic search query for RAG",
-    "keywords": ["keyword1", "keyword2"]
+    "searchQuery": "Arabic search query for legal database lookup",
+    "keywords": ["keyword1", "keyword2", "keyword3"],
+    "trendReason": "1-sentence explanation of why this topic is trending"
   }
 ]`;
 
     const response = await client.chat.completions.create({
         model: "google/gemini-2.0-flash-001",
-        messages: [{ role: "system", content: systemPrompt }],
+        messages: [{ role: "user", content: systemPrompt }],
         max_tokens: 8000,
         response_format: { type: "json_object" }
     });
 
     const content = response.choices[0]?.message?.content || "[]";
     try {
-        // Strip out markdown code blocks if present (```json ... ``` or just ``` ... ```)
-        let jsonStr = content.replace(/^```(json)?\s*/, "").replace(/\s*```$/, "");
-        // Remove any leading/trailing whitespace
-        jsonStr = jsonStr.trim();
-        // Remove trailing commas before closing braces/brackets to fix JSON parsing errors
-        jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
+        let jsonStr = content
+            .replace(/^```(json)?\s*/, "")
+            .replace(/\s*```$/, "")
+            .trim()
+            // Fix trailing commas before closing braces/brackets
+            .replace(/,\s*([}\]])/g, '$1');
 
         const parsed = JSON.parse(jsonStr);
-        return Array.isArray(parsed) ? parsed : (parsed.topics || []);
+        const topics = Array.isArray(parsed) ? parsed : (parsed.topics || []);
+
+        // Log the trend reasons so the operator knows why each topic was chosen
+        topics.forEach((t: any, i: number) => {
+            console.log(`      ${i + 1}. ${t.slug} — ${t.trendReason || "(no reason given)"}`);
+        });
+
+        return topics;
     } catch (e) {
         console.error("Failed to parse generated topics:", e);
         console.error("Raw content:", content);
@@ -336,7 +463,8 @@ image: "${blog.image}"
 async function main(): Promise<void> {
     console.log("╔══════════════════════════════════════════════════════════════╗");
     console.log("║     🇲🇦 MOROCCAN LAW MULTILINGUAL BLOG GENERATOR              ║");
-    console.log("║     Generating 8 articles × 3 languages = 24 blog posts      ║");
+    console.log("║     Step 1: Perplexity sonar-pro searches trending topics     ║");
+    console.log("║     Step 2: Gemini synthesizes → 8 topics × 3 languages      ║");
     console.log("╚══════════════════════════════════════════════════════════════╝\n");
 
     // Verify API key is set
