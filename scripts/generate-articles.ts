@@ -529,14 +529,33 @@ async function main(): Promise<void> {
              * multimodal parts (inline_data) which the SDK discards.
              */
             const imagePrompt = [
-                `Generate a realistic, high-quality photo-style image for a blog article titled: "${topic.titles.en}".`,
-                `Style: Semi-realistic stock photography look. Think Shutterstock or Getty Images editorial photos.`,
-                `Context: The image MUST clearly reflect contemporary Morocco. Include subtle Moroccan architectural elements (like zellige, arches, or modern Moroccan design), or Moroccan urban environments (like Casablanca or Rabat). Avoid generic Western settings.`,
-                `Show real-world scenes related to the topic — people in professional settings, offices, courtrooms, documents, or relevant environments. If people are included, they should reflect Moroccan demographics and wear attire suitable for modern professional Morocco.`,
-                `Use natural lighting, professional composition, and a warm professional color palette.`,
-                `Do NOT include any text, words, watermarks, or logos in the image.`,
-                `The image should look like a premium editorial photograph, not an abstract illustration.`,
-            ].join(" ");
+                // --- Core directive: scene replication ---
+                `Create a single, hyper-realistic editorial photograph that tells the STORY of this blog article at a glance.`,
+                `Blog title: "${topic.titles.en}".`,
+                `Blog keywords: ${topic.keywords.join(", ")}.`,
+
+                // --- Scene composition & narrative ---
+                `SCENE DIRECTION: Reconstruct the exact real-world moment the article describes.`,
+                `Examples of what this means:`,
+                `• A divorce article → a woman sitting across from a lawyer at a desk, signing papers, her expression is conflicted; soft window light rakes across the table.`,
+                `• A labor rights article → a factory floor or open-plan office mid-dispute; a supervisor and a worker face each other, body language tense, coworkers watching in the background.`,
+                `• A real estate article → a young couple standing in the doorway of an empty apartment, the agent gesturing inside; golden-hour light floods the room.`,
+                `• A criminal law article → a dimly lit courtroom corridor; a defendant and their lawyer whispering urgently outside heavy wooden doors.`,
+                `Choose the most visually dramatic and emotionally resonant moment from the topic. Capture mid-action, not posed.`,
+
+                // --- Photographic technique ---
+                `CAMERA: Shot on a full-frame 35mm sensor. Focal length 35-85mm depending on scene intimacy.`,
+                `Use shallow depth of field (f/1.8–f/2.8) to isolate the subject from the environment. Background should be softly bokeh'd but still contextually readable.`,
+                `LIGHTING: Motivated natural light — window light, golden hour, or diffused overcast. Allow dramatic shadows and highlights. Avoid flat, even studio lighting.`,
+                `COLOR GRADE: Muted, desaturated warm tones — think Kodak Portra 400 film stock. Slight grain is acceptable. Blacks should be lifted slightly (cinematic log look).`,
+                `COMPOSITION: Use the rule of thirds or leading lines. Place the emotional anchor (a face, hands on a document, a gesture) at a power point. Include environmental storytelling in the frame edges.`,
+
+                // --- Moroccan identity (subtle) ---
+                `CASTING: All people in the scene must have North African / Moroccan facial features, skin tones, and hair textures. This is the ONLY culturally specific element. Everything else — clothing, setting, props — should be modern and universally relatable. No traditional garments, no ornate architecture, no flags, no calligraphy.`,
+
+                // --- Hard constraints ---
+                `ABSOLUTE RESTRICTIONS: Zero text, zero words, zero watermarks, zero logos, zero UI overlays, zero borders. The image must be a clean photograph with nothing overlaid.`,
+            ].join("\n");
 
             const rawResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                 method: "POST",
