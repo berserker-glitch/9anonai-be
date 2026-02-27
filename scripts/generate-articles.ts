@@ -531,7 +531,8 @@ async function main(): Promise<void> {
             const imagePrompt = [
                 `Generate a realistic, high-quality photo-style image for a blog article titled: "${topic.titles.en}".`,
                 `Style: Semi-realistic stock photography look. Think Shutterstock or Getty Images editorial photos.`,
-                `Show real-world scenes related to the topic — people in professional settings, offices, courtrooms, documents, cityscapes, or relevant environments.`,
+                `Context: The image MUST clearly reflect contemporary Morocco. Include subtle Moroccan architectural elements (like zellige, arches, or modern Moroccan design), or Moroccan urban environments (like Casablanca or Rabat). Avoid generic Western settings.`,
+                `Show real-world scenes related to the topic — people in professional settings, offices, courtrooms, documents, or relevant environments. If people are included, they should reflect Moroccan demographics and wear attire suitable for modern professional Morocco.`,
                 `Use natural lighting, professional composition, and a warm professional color palette.`,
                 `Do NOT include any text, words, watermarks, or logos in the image.`,
                 `The image should look like a premium editorial photograph, not an abstract illustration.`,
