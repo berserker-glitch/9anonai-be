@@ -78,14 +78,20 @@ function getExistingSlugs(outputDir: string): Set<string> {
  * @param count - How many trend clusters to discover
  * @returns A rich text summary of trending legal topics with citations
  */
-async function searchTrendingTopics(count: number = 8): Promise<string> {
+async function searchTrendingTopics(existingList: string, count: number = 8): Promise<string> {
     console.log(`   🔎 Querying Perplexity sonar-pro for trending Moroccan law searches...`);
 
-    const searchPrompt = `You are a legal content researcher. Search the web comprehensively to find:
+const searchPrompt = `You are a legal content researcher. Search the web comprehensively to find:
 
 1. What legal topics are Moroccans actively searching for right now?
 2. What new Moroccan laws, reforms, or legal changes have been announced or discussed recently?
 3. What legal problems or questions are most commonly asked in Morocco?
+
+IMPORTANT CONTEXT:
+We have already published articles on the following topics/slugs:
+${existingList ? existingList : "None yet."}
+
+DO NOT suggest or research these ALREADY PUBLISHED topics UNLESS there is a significant new development, law change, or new trend specifically related to them that hasn't been covered before.
 
 Search across:
 - Moroccan news sites (Hespress, Le360, Médio24, Yabiladi, 2M, TelQuel)
@@ -156,10 +162,10 @@ Be specific and data-driven. Cite your sources.`;
  * @returns Array of structured blog topic objects
  */
 async function generateNewTopics(existingSlugs: Set<string>, count: number = 8): Promise<any[]> {
-    // --- Phase 1: Discover what people are searching for via Perplexity ---
-    const trendReport = await searchTrendingTopics(count);
-
     const existingList = Array.from(existingSlugs).join(", ");
+
+    // --- Phase 1: Discover what people are searching for via Perplexity ---
+    const trendReport = await searchTrendingTopics(existingList, count);
 
     // --- Phase 2: Synthesize trend data into structured blog topics ---
     const systemPrompt = `You are a content strategist for "9anon", Morocco's #1 AI legal platform.
