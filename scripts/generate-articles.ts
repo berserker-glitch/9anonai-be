@@ -535,6 +535,8 @@ interface BlogTopic {
  * @param topicIndex - Topic number (1-8)
  * @param langIndex - Language index (0-2)
  * @param imageUrl - URL of the generated image
+ * @param serpBrief - SERP competitor analysis brief (from analyzeSERPCompetitors)
+ * @param linkBank - Internal link bank string (from buildLinkBank)
  * @returns Generated blog object
  */
 async function generateBlogInLanguage(
@@ -543,7 +545,9 @@ async function generateBlogInLanguage(
     context: string,
     topicIndex: number,
     langIndex: number,
-    imageUrl: string
+    imageUrl: string,
+    serpBrief: string = "",
+    linkBank: string = ""
 ): Promise<GeneratedBlog> {
     console.log(`      🌐 [${language.name}] Generating...`);
 
@@ -560,37 +564,63 @@ N'utilisez jamais d'emojis.
 Utilisez une grammaire et une ponctuation françaises correctes.`
     };
 
+    // Build the SERP intelligence section if available
+    const serpSection = serpBrief ? `
+SERP COMPETITOR INTELLIGENCE (use this to write a BETTER article than competitors):
+---
+${serpBrief}
+---
+IMPORTANT: Your article MUST cover everything competitors cover AND fill the gaps they miss.
+Answer ALL "People Also Ask" questions within the article body naturally.` : "";
+
+    // Build the internal linking section if available
+    const linkingSection = linkBank ? `
+INTERNAL LINKING:
+${linkBank}
+
+RULES: Naturally embed 2-3 internal links using markdown format [anchor text](/blog/slug).
+Only link where contextually relevant. Do NOT force links.` : "";
+
     const systemPrompt = `You are an expert legal writer specializing in Moroccan law.
-Your task is to write a professional, educational blog article.
+Your task is to write a professional, educational, SEO-optimized blog article that will RANK #1 on Google.
 
 ${languageInstructions[language.code]}
 
 WRITING GUIDELINES:
 1. Write in clear, accessible language that non-lawyers can understand
-2. Include specific references to Moroccan laws, codes, and articles when available in the context
-3. Structure the article with clear sections using markdown headings (## for main sections)
-4. Include practical examples and real-world applications
-5. Mention relevant Moroccan legal institutions and procedures
-6. Cite specific article numbers and law names when provided in the context
-7. Target length: 800-1200 words (medium-length blog post)
-8. Use proper markdown formatting throughout
+2. Include specific references to Moroccan laws, codes, and articles — cite AT LEAST 5 specific article numbers
+3. Structure the article with clear sections using markdown headings (## for main sections, ### for subsections)
+4. Include practical examples, real-world scenarios, and step-by-step procedures
+5. Mention relevant Moroccan legal institutions, courts, and administrative procedures
+6. Cite specific article numbers and law names from the provided context AND your own knowledge
+7. Target length: 2000-3000 words (comprehensive, in-depth article)
+8. Use proper markdown formatting throughout — bold key terms, use bullet lists for procedures
 9. NEVER use emojis
+10. Include the current year (2026) naturally for freshness signals
+11. Use the E-E-A-T framework: demonstrate Experience, Expertise, Authoritativeness, Trustworthiness
 
-ARTICLE STRUCTURE:
-- Brief introduction (2-3 paragraphs)
-- 3-4 main sections with practical information
-- Conclusion with key takeaways
+ARTICLE STRUCTURE (MANDATORY — follow this exactly):
+1. Hook Introduction (200-300 words): Start with a compelling real-world scenario or question that the reader identifies with. State what they will learn.
+2. Legal Foundation (300-400 words): Cite the primary laws, codes, and articles that govern this topic.
+3. Practical Guide (400-500 words): Step-by-step procedures, required documents, timelines, costs.
+4. Key Provisions Explained (400-500 words): Break down the most important legal provisions in plain language.
+5. Common Mistakes & How to Avoid Them (200-300 words): Practical pitfalls people encounter.
+6. Conclusion with Key Takeaways (200 words): Summarize in bullet points.
+${serpSection}
+${linkingSection}
+
+KEY TAKEAWAYS GENERATION:
+After the conclusion, output a JSON array of 4-5 key takeaways preceded by this exact marker:
+<!-- KEY_TAKEAWAYS -->
+[{"takeaway": "One-sentence key insight"}]
 
 FAQ GENERATION:
-After the main article content and after the "Related Search Terms" section, output
-a JSON block of 3-4 FAQ items on a new line, preceded by the exact marker:
-<!-- FAQ_JSON -->
-Then output the JSON array. Each FAQ item should be a commonly searched question
-about this topic with a concise 2-3 sentence answer. Example format:
+After the key takeaways, output a JSON block of 5-6 FAQ items preceded by the exact marker:
 <!-- FAQ_JSON -->
 [{"question": "..?", "answer": "..."}]
+Each FAQ should be a commonly searched question with a concise 2-3 sentence answer.
 
-At the end of the article (BEFORE the FAQ_JSON block), add this exact section:
+At the end of the article (BEFORE the KEY_TAKEAWAYS block), add this exact section:
 ---
 
 ### Related Search Terms
@@ -607,27 +637,30 @@ Write a blog article with title: "${topic.titles[language.code as keyof typeof t
 
 Keywords to cover: ${topic.keywords.join(", ")}
 
-Generate a well-structured blog article that educates readers about this area of Moroccan law.`
+Generate a comprehensive, in-depth blog article that educates readers about this area of Moroccan law.
+Make it the BEST, most complete article on this topic on the entire internet.`
         : `Write a blog article with title: "${topic.titles[language.code as keyof typeof topic.titles]}"
 
 Keywords to cover: ${topic.keywords.join(", ")}
 
-Generate a well-structured blog article that educates readers about this area of Moroccan law.
-Use your knowledge of Moroccan legal frameworks and cite specific laws where applicable.`;
+Generate a comprehensive, in-depth blog article that educates readers about this area of Moroccan law.
+Use your knowledge of Moroccan legal frameworks and cite specific laws where applicable.
+Make it the BEST, most complete article on this topic on the entire internet.`;
 
-    // Generate the article using the LLM
+    // Generate the article using the LLM — max_tokens raised from 3000 to 8000
     const response = await client.chat.completions.create({
         model: "google/gemini-3-flash-preview",
         messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt }
         ],
-        max_tokens: 3000,
-        temperature: 0.7,
+        max_tokens: 8000,
+        // Lower temperature for more authoritative, factual content
+        temperature: 0.5,
     });
 
     const content = response.choices[0]?.message?.content || "";
-    console.log(`      ✅ [${language.name}] Done (${content.length} chars)`);
+    console.log(`      ✅ [${language.name}] Done (${content.length} chars, ~${content.trim().split(/\s+/).length} words)`);
 
     return {
         slug: topic.slug,
@@ -637,7 +670,12 @@ Use your knowledge of Moroccan legal frameworks and cite specific laws where app
         content: content,
         image: imageUrl,
         sources: [],
-        generatedAt: new Date()
+        generatedAt: new Date(),
+        keywords: topic.keywords,
+        category: topic.category || "law",
+        keyTakeaways: [],
+    };
+}
     };
 }
 
