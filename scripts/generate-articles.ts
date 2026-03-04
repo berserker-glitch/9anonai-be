@@ -706,17 +706,40 @@ Make it the BEST, most complete article on this topic on the entire internet.`;
  * @param blog - The generated blog article
  * @param language - Language configuration
  * @param outputDir - Directory to save blog files
+ * @param validSlugs - List of valid published slugs to protect against hallucinated links
  */
-function saveBlog(blog: GeneratedBlog, language: typeof LANGUAGES[0], outputDir: string): void {
+function saveBlog(blog: GeneratedBlog, language: typeof LANGUAGES[0], outputDir: string, validSlugs: Set<string>): void {
     const filename = `${blog.slug}${language.suffix}.md`;
     const filepath = path.join(outputDir, filename);
+
+    /**
+     * Prevent LLM internal linking hallucinations.
+     * We scan the content for markdown links matching /blog/slug.
+     * If the slug is NOT in our valid list, we strip the link syntax and keep just the text.
+     */
+    let articleContent = blog.content;
+    const linkRegex = /\[([^\]]+)\]\((?:\/blog\/|https?:\/\/(?:www\.)?9anon\.com\/blog\/)?([^\)]+)\)/g;
+    articleContent = articleContent.replace(linkRegex, (match, anchorText, slugOrUrl) => {
+        // Extract just the slug if it's a full URL
+        const slug = slugOrUrl.split('/').pop()?.split('#')[0] || slugOrUrl;
+
+        if (validSlugs.has(slug)) {
+            // It's a valid internal link
+            return `[${anchorText}](/blog/${slug})`;
+        } else if (slugOrUrl.startsWith('http') && !slugOrUrl.includes('9anon.com')) {
+            // It's an external link (allow it)
+            return match;
+        } else {
+            // It's a hallucinated internal link! Strip it.
+            return anchorText;
+        }
+    });
 
     /**
      * Extract FAQ JSON and Key Takeaways from the generated content.
      * Both markers are stripped from the article body and placed
      * into the frontmatter YAML for structured data consumption.
      */
-    let articleContent = blog.content;
     let faqYaml = "";
     let keyTakeawaysYaml = "";
 
@@ -906,7 +929,7 @@ async function main(): Promise<void> {
                 }
 
                 blog.sources = sources.map(s => s.document_name || s.source_file || "Unknown");
-                saveBlog(blog, language, outputDir);
+                saveBlog(blog, language, outputDir, existingSlugs);
                 successCount++;
 
                 // Track saved file for image path update later
