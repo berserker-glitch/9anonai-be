@@ -348,6 +348,172 @@ ${doc.text}
     }).join("\n\n");
 }
 
+/**
+ * Step 3 of the topic pipeline: SERP competitor analysis.
+ *
+ * Uses Perplexity to search for the exact topic on Google Morocco,
+ * identify top-ranking articles and their content gaps, and extract
+ * "People Also Ask" questions. This intelligence is fed into the
+ * article generation prompt so our content outcompetes existing results.
+ *
+ * @param topic - The blog topic to research
+ * @returns A structured brief with competitor gaps and PAA questions
+ */
+async function analyzeSERPCompetitors(topic: BlogTopic): Promise<string> {
+    console.log(`   🔬 Analyzing SERP competitors for: "${topic.titles.en}"...`);
+
+    const serpPrompt = `Search Google for the following query and analyze the top results:
+
+Query: "${topic.titles.en}" Morocco law
+
+Also search in French: "${topic.titles.fr}"
+And in Arabic: "${topic.titles.ar}"
+
+For each of the top 5 ranking results, analyze:
+1. What specific legal articles/laws do they cite?
+2. What sections/topics do they cover?
+3. What is their approximate word count?
+4. What do they MISS or cover poorly?
+
+Also extract:
+- All "People Also Ask" questions related to this topic
+- Related search suggestions at the bottom of the SERP
+- Any featured snippet content
+
+Return a structured brief with:
+COMPETITOR GAPS: What the top results miss or cover poorly
+PEOPLE ALSO ASK: List of PAA questions found
+MUST-COVER TOPICS: Sections we MUST include to outrank competitors
+RECOMMENDED WORD COUNT: Based on competitor analysis`;
+
+    try {
+        const response = await perplexityClient.chat.completions.create({
+            model: "perplexity/sonar-pro",
+            messages: [{ role: "user", content: serpPrompt }],
+            max_tokens: 3000,
+        });
+
+        const result = response.choices[0]?.message?.content || "";
+        console.log(`   ✅ SERP analysis complete (${result.length} chars)`);
+        return result;
+    } catch (error) {
+        console.error(`   ❌ SERP analysis failed:`, error);
+        // Non-fatal: article generation continues without SERP data
+        return "";
+    }
+}
+
+/**
+ * Build a "link bank" of existing articles for internal linking.
+ *
+ * Reads all existing blog markdown files in the output directory,
+ * extracts their slug, title, and keywords from frontmatter, and
+ * returns a formatted string the LLM can use to naturally embed
+ * internal links in the generated article.
+ *
+ * @param outputDir - Directory where blog markdown files live
+ * @param currentSlug - Slug of the article being generated (excluded)
+ * @param lang - Language code to read the right file variant
+ * @returns A formatted list of existing articles for LLM context
+ */
+function buildLinkBank(outputDir: string, currentSlug: string, lang: string): string {
+    try {
+        const files = fs.readdirSync(outputDir);
+
+        // Filter files for the target language
+        const targetFiles = files.filter(f => {
+            if (lang === "ar") {
+                return f.endsWith(".md") && !f.endsWith(".en.md") && !f.endsWith(".fr.md");
+            }
+            return f.endsWith(`.${lang}.md`);
+        });
+
+        const linkEntries: string[] = [];
+
+        for (const file of targetFiles) {
+            const slug = file.replace(/\.(?:[a-z]{2}\.)?md$/, "");
+            // Skip the article we're currently generating
+            if (slug === currentSlug) continue;
+
+            const filepath = path.join(outputDir, file);
+            const content = fs.readFileSync(filepath, "utf-8");
+
+            // Extract title from frontmatter
+            const titleMatch = content.match(/^title:\s*"(.+)"/m);
+            const title = titleMatch ? titleMatch[1] : slug;
+
+            // Extract keywords if available
+            const kwMatch = content.match(/^keywords:\s*\[(.+)\]/m);
+            const keywords = kwMatch ? kwMatch[1] : "";
+
+            linkEntries.push(`- [${title}](/blog/${slug}) ${keywords ? `(keywords: ${keywords})` : ""}`);
+        }
+
+        if (linkEntries.length === 0) return "";
+
+        return `\nINTERNAL LINK BANK — Use these to embed 2-3 contextually relevant links:\n${linkEntries.join("\n")}`;
+    } catch {
+        return "";
+    }
+}
+
+/**
+ * Post-generation quality validation gate.
+ *
+ * Checks that the generated article meets minimum quality thresholds
+ * before it's saved. Returns a list of failures; an empty array means
+ * the article passed all checks.
+ *
+ * @param content - The generated markdown article content
+ * @param lang - Language code of the article
+ * @returns Array of failure descriptions (empty = passed)
+ */
+function validateArticleQuality(content: string, lang: string): string[] {
+    const failures: string[] = [];
+
+    // 1. Word count check — aim for 1800+ words for competitive SEO
+    const wordCount = content.trim().split(/\s+/).length;
+    if (wordCount < 1500) {
+        failures.push(`Word count too low: ${wordCount} (minimum 1500)`);
+    }
+
+    // 2. Heading count check — at least 4 ## headings for structure
+    const h2Count = (content.match(/^##\s+/gm) || []).length;
+    if (h2Count < 4) {
+        failures.push(`Too few H2 headings: ${h2Count} (minimum 4)`);
+    }
+
+    // 3. Law reference check — should cite specific articles
+    const lawRefPatterns = [
+        /Article\s+\d+/gi,         // English: "Article 15"
+        /المادة\s+\d+/g,           // Arabic: "المادة 15"
+        /article\s+\d+/gi,         // French: "article 15"
+        /Law\s+(?:No\.?\s*)?\d+/gi, // "Law No. 70.03"
+        /القانون\s+رقم\s+\d+/g,   // Arabic law references
+        /Loi\s+(?:n°?\s*)?\d+/gi,  // French: "Loi n° 70.03"
+    ];
+    const lawRefs = lawRefPatterns.reduce((count, pattern) => {
+        return count + (content.match(pattern) || []).length;
+    }, 0);
+    if (lawRefs < 2) {
+        failures.push(`Too few law references: ${lawRefs} (minimum 2)`);
+    }
+
+    // 4. FAQ check — should have the FAQ_JSON marker
+    if (!content.includes("<!-- FAQ_JSON -->")) {
+        failures.push("Missing FAQ_JSON block");
+    }
+
+    // 5. Internal link check — should have at least 1 internal link
+    const internalLinks = (content.match(/\]\(\/blog\//g) || []).length;
+    if (internalLinks < 1) {
+        // This is a warning, not a hard failure
+        console.log(`      ⚠️  No internal links found (recommended: 2-3)`);
+    }
+
+    return failures;
+}
+
 interface BlogTopic {
     slug: string;
     titles: { ar: string; en: string; fr: string };
