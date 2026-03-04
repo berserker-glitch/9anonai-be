@@ -81,7 +81,7 @@ function getExistingSlugs(outputDir: string): Set<string> {
 async function searchTrendingTopics(existingList: string, count: number = 8): Promise<string> {
     console.log(`   🔎 Querying Perplexity sonar-pro for trending Moroccan law searches...`);
 
-const searchPrompt = `You are a legal content researcher. Search the web comprehensively to find:
+    const searchPrompt = `You are a legal content researcher. Search the web comprehensively to find:
 
 1. What legal topics are Moroccans actively searching for right now?
 2. What new Moroccan laws, reforms, or legal changes have been announced or discussed recently?
@@ -190,6 +190,22 @@ RULES:
 - Prefer topics where there is a recent law change or legal development driving interest
 - Mix individual-focused topics (citizen rights, family law) with business topics
 - The slug must be in English kebab-case and unique
+
+TITLE RULES (for all 3 languages):
+- Start with "How to", a number, or the specific law number (e.g. "Law 10-95")
+- Include the current year (2026) for freshness signals
+- Add the word "Morocco" or "Moroccan" for geo-targeting
+- Max 60 characters — Google truncates longer titles
+- Avoid academic phrasing like "An Analysis of" or "Comprehensive Guide to"
+- Use power words: "Full Text", "Step-by-Step", "Explained", "Your Rights"
+- Use "vs", numbers, or parenthetical years for CTR boost
+
+DESCRIPTION RULES (for all 3 languages):
+- 140-155 characters — fills the full Google snippet on desktop
+- Formula: [Problem/Question] + [What you'll learn] + [Trust signal]
+- Include 1-2 specific details (law numbers, procedures, costs)
+- End with an action or benefit, not a trailing sentence
+- Never start with "A comprehensive guide" — that's a CTR killer
 
 Return ONLY a valid JSON array with exactly this structure:
 [
@@ -384,7 +400,16 @@ ARTICLE STRUCTURE:
 - 3-4 main sections with practical information
 - Conclusion with key takeaways
 
-At the end, add this exact section:
+FAQ GENERATION:
+After the main article content and after the "Related Search Terms" section, output
+a JSON block of 3-4 FAQ items on a new line, preceded by the exact marker:
+<!-- FAQ_JSON -->
+Then output the JSON array. Each FAQ item should be a commonly searched question
+about this topic with a concise 2-3 sentence answer. Example format:
+<!-- FAQ_JSON -->
+[{"question": "..?", "answer": "..."}]
+
+At the end of the article (BEFORE the FAQ_JSON block), add this exact section:
 ---
 
 ### Related Search Terms
@@ -436,7 +461,9 @@ Use your knowledge of Moroccan legal frameworks and cite specific laws where app
 }
 
 /**
- * Save a blog article to the filesystem as a Markdown file
+ * Save a blog article to the filesystem as a Markdown file.
+ * Parses optional FAQ JSON from the generated content and adds it
+ * to the frontmatter YAML for Google FAQ rich snippets.
  * 
  * @param blog - The generated blog article
  * @param language - Language configuration
@@ -446,17 +473,49 @@ function saveBlog(blog: GeneratedBlog, language: typeof LANGUAGES[0], outputDir:
     const filename = `${blog.slug}${language.suffix}.md`;
     const filepath = path.join(outputDir, filename);
 
+    /**
+     * Extract FAQ JSON from the generated content if the LLM included
+     * the <!-- FAQ_JSON --> marker. The FAQ is stripped from the article
+     * body and placed into the frontmatter instead.
+     */
+    let articleContent = blog.content;
+    let faqYaml = "";
+
+    const faqMarkerIdx = articleContent.indexOf("<!-- FAQ_JSON -->");
+    if (faqMarkerIdx !== -1) {
+        const afterMarker = articleContent.substring(faqMarkerIdx + "<!-- FAQ_JSON -->".length).trim();
+        // Remove the FAQ marker and everything after it from the article body
+        articleContent = articleContent.substring(0, faqMarkerIdx).trim();
+
+        try {
+            // Extract JSON array from the remaining text
+            const jsonMatch = afterMarker.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+            if (jsonMatch) {
+                const faqItems: Array<{ question: string; answer: string }> = JSON.parse(jsonMatch[0]);
+                if (faqItems.length > 0) {
+                    // Build YAML-formatted FAQ block for frontmatter
+                    faqYaml = "faq:\n" + faqItems.map(item =>
+                        `  - question: "${item.question.replace(/"/g, '\\"')}"\n    answer: "${item.answer.replace(/"/g, '\\"')}"`
+                    ).join("\n");
+                    console.log(`      📋 Extracted ${faqItems.length} FAQ items for rich snippets`);
+                }
+            }
+        } catch (faqErr) {
+            console.warn(`      ⚠️ Failed to parse FAQ JSON, skipping:`, faqErr);
+        }
+    }
+
     // Build the complete markdown content with frontmatter
     const frontmatter = `---
 title: "${blog.title}"
 date: "${blog.generatedAt.toISOString().split("T")[0]}"
 description: "${blog.description}"
 image: "${blog.image}"
----
+${faqYaml ? faqYaml + "\n" : ""}---
 
 `;
 
-    const fullContent = frontmatter + blog.content;
+    const fullContent = frontmatter + articleContent;
 
     fs.writeFileSync(filepath, fullContent, "utf-8");
     console.log(`      💾 Saved: ${filename}`);
