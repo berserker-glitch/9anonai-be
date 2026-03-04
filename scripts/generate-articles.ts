@@ -793,10 +793,12 @@ ${keywordsYaml}${categoryYaml}${keyTakeawaysYaml ? keyTakeawaysYaml + "\n" : ""}
  * Generates all 8 blog articles in 3 languages and saves them
  */
 async function main(): Promise<void> {
-    console.log("╔══════════════════════════════════════════════════════════════╗");
-    console.log("║     🇲🇦 MOROCCAN LAW MULTILINGUAL BLOG GENERATOR              ║");
-    console.log("║     Step 1: Perplexity sonar-pro searches trending topics     ║");
-    console.log("║     Step 2: Gemini synthesizes → 8 topics × 3 languages      ║");
+    console.log("\n╔══════════════════════════════════════════════════════════════╗");
+    console.log("║     🇲🇦 MOROCCAN LAW MULTILINGUAL BLOG GENERATOR  (v2.0)     ║");
+    console.log("║     Step 1: Perplexity sonar-pro → trending topics           ║");
+    console.log("║     Step 2: SERP competitor analysis → content brief         ║");
+    console.log("║     Step 3: Gemini → 8 topics × 3 languages (2000+ words)   ║");
+    console.log("║     Step 4: Quality validation gate → retry if needed        ║");
     console.log("╚══════════════════════════════════════════════════════════════╝\n");
 
     // Verify API key is set
@@ -1003,12 +1005,13 @@ async function main(): Promise<void> {
                     fs.mkdirSync(imagesDir, { recursive: true });
                 }
 
-                const finalImagePath = path.join(imagesDir, `${topic.slug}.png`);
+                const finalImagePath = path.join(imagesDir, `${topic.slug}.webp`);
                 const logoPath = path.resolve(__dirname, "..", "..", "FE", "public", "Layer 3.png");
 
                 /**
                  * Composite the 9anon logo onto the bottom-left corner.
                  * Logo is resized to 6% of image width, with 40% opacity and 20px padding.
+                 * Output as WebP for 60-80% smaller file size vs PNG.
                  */
                 const mainImage = sharp(imageBuffer);
                 const metadata = await mainImage.metadata();
@@ -1028,17 +1031,18 @@ async function main(): Promise<void> {
                 const logoMeta = await sharp(resizedLogo).metadata();
                 const logoHeight = logoMeta.height || logoSize;
 
+                // Composite logo and output as WebP for SEO-optimal file size
                 await sharp(imageBuffer)
                     .composite([{
                         input: resizedLogo,
                         left: padding,
                         top: imgHeight - logoHeight - padding,
                     }])
-                    .png()
+                    .webp({ quality: 85 })
                     .toFile(finalImagePath);
 
-                imageUrl = `/blog-images/${topic.slug}.png`;
-                console.log(`   ✅ Image saved to ${imageUrl} (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
+                imageUrl = `/blog-images/${topic.slug}.webp`;
+                console.log(`   ✅ Image saved as WebP to ${imageUrl} (${(imageBuffer.length / 1024).toFixed(1)} KB raw → WebP)`);
             } else {
                 console.warn(`   ⚠️ Could not extract a valid image from the response.`);
                 // Log the full structure for debugging
@@ -1048,15 +1052,55 @@ async function main(): Promise<void> {
             console.error(`   ❌ Failed to generate/composite image:`, imageErr);
         }
 
-        // Step 2: Generate in all 3 languages
+        // Step 2: SERP competitor analysis (once per topic, shared across languages)
+        const serpBrief = await analyzeSERPCompetitors(topic);
+
+        // Step 3: Generate in all 3 languages with quality validation + retry
         for (let langIdx = 0; langIdx < LANGUAGES.length; langIdx++) {
             const language = LANGUAGES[langIdx];
 
             try {
-                const blog = await generateBlogInLanguage(topic, language, context, topicIdx + 1, langIdx, imageUrl);
-                blog.sources = sources.map(s => s.document_name || s.source_file || "Unknown");
-                saveBlog(blog, language, outputDir);
-                successCount++;
+                // Build internal link bank for this language
+                const linkBank = buildLinkBank(outputDir, topic.slug, language.code);
+
+                // Quality gate: generate → validate → retry up to 2 times if needed
+                const MAX_RETRIES = 2;
+                let blog: GeneratedBlog | null = null;
+                let attempt = 0;
+
+                while (attempt <= MAX_RETRIES) {
+                    attempt++;
+                    const generated = await generateBlogInLanguage(
+                        topic, language, context, topicIdx + 1, langIdx,
+                        imageUrl, serpBrief, linkBank
+                    );
+
+                    // Run quality validation
+                    const failures = validateArticleQuality(generated.content, language.code);
+
+                    if (failures.length === 0) {
+                        console.log(`      \u2705 Quality check passed (attempt ${attempt})`);
+                        blog = generated;
+                        break;
+                    }
+
+                    console.log(`      \u26a0\ufe0f Quality check failed (attempt ${attempt}/${MAX_RETRIES + 1}):`);
+                    failures.forEach(f => console.log(`         - ${f}`));
+
+                    if (attempt <= MAX_RETRIES) {
+                        console.log(`      \ud83d\udd04 Retrying with stricter instructions...`);
+                    } else {
+                        // Accept the last attempt even with failures (best effort)
+                        console.log(`      \u26a0\ufe0f Max retries reached — saving best effort article`);
+                        blog = generated;
+                    }
+                }
+
+                if (blog) {
+                    blog.sources = sources.map(s => s.document_name || s.source_file || "Unknown");
+                    saveBlog(blog, language, outputDir);
+                    successCount++;
+                }
 
                 /**
                  * Auto-commit the newly generated blog to Git.
