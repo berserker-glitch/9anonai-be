@@ -796,6 +796,7 @@ date: "${today}"
 lastModified: "${today}"
 description: "${blog.description}"
 image: "${blog.image}"
+imageAlt: "${blog.description.slice(0, 120)}"
 author: "9anon AI"
 ${keywordsYaml}${categoryYaml}${keyTakeawaysYaml ? keyTakeawaysYaml + "\n" : ""}${faqYaml ? faqYaml + "\n" : ""}---
 
@@ -1080,34 +1081,33 @@ async function main(): Promise<void> {
                     const logoPath = path.resolve(__dirname, "..", "..", "FE", "public", "Layer 3.png");
 
                     /**
-                     * Composite the 9anon logo onto the bottom-left corner.
-                     * Logo is resized to 6% of image width, with 40% opacity and 20px padding.
-                     * Output as WebP for 60-80% smaller file size vs PNG.
+                     * Resize to OG-standard 1200×630 and composite the 9anon logo.
+                     * This exact aspect ratio is optimal for Facebook, Twitter, LinkedIn,
+                     * WhatsApp, and Google Discover preview cards.
                      */
-                    const mainImage = sharp(imageBuffer);
-                    const metadata = await mainImage.metadata();
-                    const imgWidth = metadata.width || 800;
-                    const imgHeight = metadata.height || 600;
-                    const logoSize = Math.round(imgWidth * 0.06); // 6% of image width — small watermark
-                    const padding = 20; // px padding from bottom-left edges
+                    const resizedImage = await sharp(imageBuffer)
+                        .resize(1200, 630, { fit: "cover", position: "center" })
+                        .toBuffer();
+
+                    const logoSize = Math.round(1200 * 0.06); // 6% of 1200px width
+                    const padding = 20;
 
                     // Resize logo and lower opacity to 40%
                     const resizedLogo = await sharp(logoPath)
                         .resize(logoSize)
                         .ensureAlpha()
-                        .linear(0.4, 0) // Scale all channels including alpha by 0.4 for 40% opacity
+                        .linear(0.4, 0)
                         .toBuffer();
 
-                    // Get resized logo dimensions for precise placement
                     const logoMeta = await sharp(resizedLogo).metadata();
                     const logoHeight = logoMeta.height || logoSize;
 
-                    // Composite logo and output as WebP for SEO-optimal file size
-                    await sharp(imageBuffer)
+                    // Composite logo onto bottom-left corner and output as WebP
+                    await sharp(resizedImage)
                         .composite([{
                             input: resizedLogo,
                             left: padding,
-                            top: imgHeight - logoHeight - padding,
+                            top: 630 - logoHeight - padding,
                         }])
                         .webp({ quality: 85 })
                         .toFile(finalImagePath);
