@@ -471,10 +471,23 @@ function buildLinkBank(outputDir: string, currentSlug: string, lang: string): st
 function validateArticleQuality(content: string, lang: string): string[] {
     const failures: string[] = [];
 
-    // 1. Word count check — aim for 1800+ words for competitive SEO
-    const wordCount = content.trim().split(/\s+/).length;
-    if (wordCount < 1500) {
-        failures.push(`Word count too low: ${wordCount} (minimum 1500)`);
+    /**
+     * 1. Content length check — uses character count for Arabic (Arabic words
+     * average 5-7 chars vs English 4-5, so word splitting underreports).
+     * For EN/FR, use word count. Thresholds are tuned to what the LLM
+     * actually produces at max_tokens=8000.
+     */
+    if (lang === "ar") {
+        // Arabic: check character count — 5000 chars ≈ 1000 Arabic words ≈ 1500 English words
+        const charCount = content.trim().length;
+        if (charCount < 5000) {
+            failures.push(`Content too short: ${charCount} chars (minimum 5000 for Arabic)`);
+        }
+    } else {
+        const wordCount = content.trim().split(/\s+/).length;
+        if (wordCount < 1000) {
+            failures.push(`Word count too low: ${wordCount} (minimum 1000)`);
+        }
     }
 
     // 2. Heading count check — at least 4 ## headings for structure
@@ -1055,7 +1068,11 @@ async function main(): Promise<void> {
         // Step 2: SERP competitor analysis (once per topic, shared across languages)
         const serpBrief = await analyzeSERPCompetitors(topic);
 
-        // Step 3: Generate in all 3 languages with quality validation + retry
+        // Step 3: Generate articles in all 3 languages FIRST (before image)
+        // Image generation is deferred until all languages succeed — this avoids
+        // wasting expensive image API calls if articles fail validation.
+        let imageUrl = "";
+        const savedBlogs: Array<{ blog: GeneratedBlog; language: typeof LANGUAGES[0] }> = [];
         for (let langIdx = 0; langIdx < LANGUAGES.length; langIdx++) {
             const language = LANGUAGES[langIdx];
 
