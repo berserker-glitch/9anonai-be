@@ -1100,30 +1100,30 @@ async function main(): Promise<void> {
                     blog.sources = sources.map(s => s.document_name || s.source_file || "Unknown");
                     saveBlog(blog, language, outputDir);
                     successCount++;
-                }
 
-                /**
-                 * Auto-commit the newly generated blog to Git.
-                 * Executes git add and commit within the FE directory.
-                 */
-                try {
-                    const feDir = path.resolve(__dirname, "..", "..", "FE");
-                    const filename = `${blog.slug}${language.suffix}.md`;
-                    // Using forward slashes for relative path within FE directory
-                    const relPath = `content/blogs/${filename}`;
+                    /**
+                     * Auto-commit the newly generated blog to Git.
+                     * Executes git add and commit within the FE directory.
+                     */
+                    try {
+                        const feDir = path.resolve(__dirname, "..", "..", "FE");
+                        const filename = `${blog.slug}${language.suffix}.md`;
+                        // Using forward slashes for relative path within FE directory
+                        const relPath = `content/blogs/${filename}`;
 
-                    // Add the specific newly created blog file
-                    execSync(`git add "${relPath}"`, { cwd: feDir });
+                        // Add the specific newly created blog file
+                        execSync(`git add "${relPath}"`, { cwd: feDir });
 
-                    // Map language code to the format required by the user (eng, fr, ar)
-                    const langStr = language.code === 'en' ? 'eng' : (language.code === 'fr' ? 'fr' : 'ar');
-                    const safeSlug = blog.slug.replace(/"/g, '\\"');
+                        // Map language code to the format required by the user (eng, fr, ar)
+                        const langStr = language.code === 'en' ? 'eng' : (language.code === 'fr' ? 'fr' : 'ar');
+                        const safeSlug = blog.slug.replace(/"/g, '\\"');
 
-                    // Commit with the required message format
-                    execSync(`git commit -m "feat(blog): added blog ${safeSlug} in ${langStr}"`, { cwd: feDir, stdio: 'pipe' });
-                    console.log(`      🚀 Git committed: ${filename}`);
-                } catch (gitError) {
-                    console.warn(`      ⚠️ Git commit skipped or failed for ${blog.slug} (might be unchanged)`);
+                        // Commit with the required message format
+                        execSync(`git commit -m "feat(blog): added blog ${safeSlug} in ${langStr}"`, { cwd: feDir, stdio: 'pipe' });
+                        console.log(`      🚀 Git committed: ${filename}`);
+                    } catch (gitError) {
+                        console.warn(`      ⚠️ Git commit skipped or failed for ${blog.slug} (might be unchanged)`);
+                    }
                 }
 
                 // Add a small delay between API calls to avoid rate limiting
