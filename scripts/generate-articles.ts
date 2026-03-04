@@ -676,8 +676,6 @@ Make it the BEST, most complete article on this topic on the entire internet.`;
         keyTakeaways: [],
     };
 }
-    };
-}
 
 /**
  * Save a blog article to the filesystem as a Markdown file.
@@ -693,44 +691,94 @@ function saveBlog(blog: GeneratedBlog, language: typeof LANGUAGES[0], outputDir:
     const filepath = path.join(outputDir, filename);
 
     /**
-     * Extract FAQ JSON from the generated content if the LLM included
-     * the <!-- FAQ_JSON --> marker. The FAQ is stripped from the article
-     * body and placed into the frontmatter instead.
+     * Extract FAQ JSON and Key Takeaways from the generated content.
+     * Both markers are stripped from the article body and placed
+     * into the frontmatter YAML for structured data consumption.
      */
     let articleContent = blog.content;
     let faqYaml = "";
+    let keyTakeawaysYaml = "";
 
-    const faqMarkerIdx = articleContent.indexOf("<!-- FAQ_JSON -->");
-    if (faqMarkerIdx !== -1) {
-        const afterMarker = articleContent.substring(faqMarkerIdx + "<!-- FAQ_JSON -->".length).trim();
-        // Remove the FAQ marker and everything after it from the article body
-        articleContent = articleContent.substring(0, faqMarkerIdx).trim();
+    // --- Extract Key Takeaways ---
+    const takeawaysMarkerIdx = articleContent.indexOf("<!-- KEY_TAKEAWAYS -->");
+    if (takeawaysMarkerIdx !== -1) {
+        const afterTakeaways = articleContent.substring(takeawaysMarkerIdx + "<!-- KEY_TAKEAWAYS -->".length);
+        // Remove the marker and everything after it from the article body (FAQ comes after)
+        articleContent = articleContent.substring(0, takeawaysMarkerIdx).trim();
 
         try {
-            // Extract JSON array from the remaining text
-            const jsonMatch = afterMarker.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+            const jsonMatch = afterTakeaways.match(/\[\s*\{[\s\S]*?\}\s*\]/);
             if (jsonMatch) {
-                const faqItems: Array<{ question: string; answer: string }> = JSON.parse(jsonMatch[0]);
-                if (faqItems.length > 0) {
-                    // Build YAML-formatted FAQ block for frontmatter
-                    faqYaml = "faq:\n" + faqItems.map(item =>
-                        `  - question: "${item.question.replace(/"/g, '\\"')}"\n    answer: "${item.answer.replace(/"/g, '\\"')}"`
+                const items: Array<{ takeaway: string }> = JSON.parse(jsonMatch[0]);
+                if (items.length > 0) {
+                    keyTakeawaysYaml = "keyTakeaways:\n" + items.map(item =>
+                        `  - "${item.takeaway.replace(/"/g, '\\"')}"`
                     ).join("\n");
-                    console.log(`      📋 Extracted ${faqItems.length} FAQ items for rich snippets`);
+                    console.log(`      🎯 Extracted ${items.length} key takeaways`);
                 }
             }
-        } catch (faqErr) {
-            console.warn(`      ⚠️ Failed to parse FAQ JSON, skipping:`, faqErr);
+
+            // Check if FAQ_JSON marker is in the remaining text after takeaways
+            const remainingText = afterTakeaways.substring((jsonMatch?.index || 0) + (jsonMatch?.[0]?.length || 0));
+            const faqInRemaining = remainingText.indexOf("<!-- FAQ_JSON -->");
+            if (faqInRemaining !== -1) {
+                const faqText = remainingText.substring(faqInRemaining + "<!-- FAQ_JSON -->".length).trim();
+                const faqJsonMatch = faqText.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+                if (faqJsonMatch) {
+                    const faqItems: Array<{ question: string; answer: string }> = JSON.parse(faqJsonMatch[0]);
+                    if (faqItems.length > 0) {
+                        faqYaml = "faq:\n" + faqItems.map(item =>
+                            `  - question: "${item.question.replace(/"/g, '\\"')}"\n    answer: "${item.answer.replace(/"/g, '\\"')}"`
+                        ).join("\n");
+                        console.log(`      📋 Extracted ${faqItems.length} FAQ items for rich snippets`);
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn(`      ⚠️ Failed to parse key takeaways, skipping:`, err);
         }
     }
 
-    // Build the complete markdown content with frontmatter
+    // --- Extract FAQ JSON (if not already extracted above) ---
+    if (!faqYaml) {
+        const faqMarkerIdx = articleContent.indexOf("<!-- FAQ_JSON -->");
+        if (faqMarkerIdx !== -1) {
+            const afterMarker = articleContent.substring(faqMarkerIdx + "<!-- FAQ_JSON -->".length).trim();
+            // Remove the FAQ marker and everything after it from the article body
+            articleContent = articleContent.substring(0, faqMarkerIdx).trim();
+
+            try {
+                const jsonMatch = afterMarker.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+                if (jsonMatch) {
+                    const faqItems: Array<{ question: string; answer: string }> = JSON.parse(jsonMatch[0]);
+                    if (faqItems.length > 0) {
+                        faqYaml = "faq:\n" + faqItems.map(item =>
+                            `  - question: "${item.question.replace(/"/g, '\\"')}"\n    answer: "${item.answer.replace(/"/g, '\\"')}"`
+                        ).join("\n");
+                        console.log(`      📋 Extracted ${faqItems.length} FAQ items for rich snippets`);
+                    }
+                }
+            } catch (faqErr) {
+                console.warn(`      ⚠️ Failed to parse FAQ JSON, skipping:`, faqErr);
+            }
+        }
+    }
+
+    // --- Build enhanced frontmatter with new SEO fields ---
+    const keywordsYaml = blog.keywords && blog.keywords.length > 0
+        ? `keywords: [${blog.keywords.map(k => `"${k}"`).join(", ")}]\n`
+        : "";
+    const categoryYaml = blog.category ? `category: "${blog.category}"\n` : "";
+    const today = blog.generatedAt.toISOString().split("T")[0];
+
     const frontmatter = `---
 title: "${blog.title}"
-date: "${blog.generatedAt.toISOString().split("T")[0]}"
+date: "${today}"
+lastModified: "${today}"
 description: "${blog.description}"
 image: "${blog.image}"
-${faqYaml ? faqYaml + "\n" : ""}---
+author: "9anon AI"
+${keywordsYaml}${categoryYaml}${keyTakeawaysYaml ? keyTakeawaysYaml + "\n" : ""}${faqYaml ? faqYaml + "\n" : ""}---
 
 `;
 
