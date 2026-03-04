@@ -929,38 +929,52 @@ async function main(): Promise<void> {
             console.log(`   🎨 Generating image for topic...`);
             try {
                 /**
-                 * Generate a professional blog illustration using Gemini's image model.
-                 * We call OpenRouter directly via fetch because the OpenAI SDK's
-                 * message.content only captures text — Gemini returns images as
-                 * multimodal parts (inline_data) which the SDK discards.
+                 * Generate a contextual blog illustration using Gemini's image model.
+                 * Now uses actual article content (key takeaways + description) from
+                 * the saved files to produce images tightly tied to the blog content.
+                 * Resized to 1200×630 (Open Graph standard) for optimal social previews.
                  */
+
+                // Extract article context from the first saved file for image grounding
+                const firstSaved = savedFiles[0];
+                const articleDescription = firstSaved.blog.description;
+                const articleKeyTakeaways = firstSaved.blog.keyTakeaways || [];
+                const articleContext = articleKeyTakeaways.length > 0
+                    ? articleKeyTakeaways.slice(0, 3).join(". ")
+                    : articleDescription;
+
                 const imagePrompt = [
-                    // --- Core directive: scene replication ---
-                    `Create a single, hyper-realistic editorial photograph that tells the STORY of this blog article at a glance.`,
-                    `Blog title: "${topic.titles.en}".`,
-                    `Blog keywords: ${topic.keywords.join(", ")}.`,
+                    // --- Core directive: content-aware scene ---
+                    `Create a single, photorealistic editorial photograph for a legal blog article.`,
+                    `The image must visually represent THIS SPECIFIC article:`,
+                    ``,
+                    `ARTICLE TITLE: "${topic.titles.en}"`,
+                    `ARTICLE SUMMARY: ${articleDescription}`,
+                    `KEY POINTS: ${articleContext}`,
+                    `KEYWORDS: ${topic.keywords.join(", ")}`,
+                    ``,
 
-                    // --- Scene composition & narrative ---
-                    `SCENE DIRECTION: Reconstruct the exact real-world moment the article describes.`,
-                    `Examples of what this means:`,
-                    `• A divorce article → a woman sitting across from a lawyer at a desk, signing papers, her expression is conflicted; soft window light rakes across the table.`,
-                    `• A labor rights article → a factory floor or open-plan office mid-dispute; a supervisor and a worker face each other, body language tense, coworkers watching in the background.`,
-                    `• A real estate article → a young couple standing in the doorway of an empty apartment, the agent gesturing inside; golden-hour light floods the room.`,
-                    `• A criminal law article → a dimly lit courtroom corridor; a defendant and their lawyer whispering urgently outside heavy wooden doors.`,
-                    `Choose the most visually dramatic and emotionally resonant moment from the topic. Capture mid-action, not posed.`,
+                    // --- Scene composition: derive from actual content ---
+                    `SCENE DIRECTION: Based on the article summary and key points above, create a SPECIFIC scene that visually embodies the core message.`,
+                    `Show a real moment that a reader of this article would recognize — people in a relevant professional or legal setting, interacting with documents, devices, or institutional environments that match the topic.`,
+                    `The scene should feel like documentary photography — authentic, mid-action, unstaged.`,
+                    `Choose the most visually dramatic moment from the topic. Capture motion, expression, and environment.`,
+                    ``,
 
-                    // --- Photographic technique ---
-                    `CAMERA: Shot on a full-frame 35mm sensor. Focal length 35-85mm depending on scene intimacy.`,
-                    `Use shallow depth of field (f/1.8–f/2.8) to isolate the subject from the environment. Background should be softly bokeh'd but still contextually readable.`,
-                    `LIGHTING: Motivated natural light — window light, golden hour, or diffused overcast. Allow dramatic shadows and highlights. Avoid flat, even studio lighting.`,
-                    `COLOR GRADE: Muted, desaturated warm tones — think Kodak Portra 400 film stock. Slight grain is acceptable. Blacks should be lifted slightly (cinematic log look).`,
-                    `COMPOSITION: Use the rule of thirds or leading lines. Place the emotional anchor (a face, hands on a document, a gesture) at a power point. Include environmental storytelling in the frame edges.`,
+                    // --- Professional photography ---
+                    `CAMERA: Full-frame 35mm, 35-85mm focal length. Shallow depth of field (f/1.8–f/2.8).`,
+                    `LIGHTING: Natural motivated light — window light, golden hour, or soft overcast. Strong contrast with dramatic shadows.`,
+                    `COLOR: Warm cinematic tones, Kodak Portra 400 feel. Slight film grain. Lifted blacks.`,
+                    `COMPOSITION: Rule of thirds. Emotional anchor at a power point. Environmental context in frame edges.`,
+                    `ASPECT RATIO: Exactly 1200×630 pixels (wide landscape, social media preview format).`,
+                    ``,
 
-                    // --- Moroccan identity (subtle) ---
-                    `CASTING: All people in the scene must have North African / Moroccan facial features, skin tones, and hair textures. This is the ONLY culturally specific element. Everything else — clothing, setting, props — should be modern and universally relatable. No traditional garments, no ornate architecture, no flags, no calligraphy.`,
+                    // --- Moroccan identity (subtle, authentic) ---
+                    `PEOPLE: North African / Moroccan appearance — authentic features, skin tones, and hair. Modern clothing. No traditional garments, ornate architecture, flags, or calligraphy. The setting should feel contemporary and international.`,
+                    ``,
 
                     // --- Hard constraints ---
-                    `ABSOLUTE RESTRICTIONS: Zero text, zero words, zero watermarks, zero logos, zero UI overlays, zero borders. The image must be a clean photograph with nothing overlaid.`,
+                    `ABSOLUTE RESTRICTIONS: ZERO text, words, watermarks, logos, UI overlays, captions, or borders anywhere in the image. Pure photograph only.`,
                 ].join("\n");
 
                 const rawResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -1136,10 +1150,20 @@ async function main(): Promise<void> {
             }
         }
 
-        // Step 5: Git commit all saved files for this topic
+        // Step 5: Git commit all saved files + image for this topic
+        const feDir = path.resolve(__dirname, "..", "..", "FE");
+
+        // Git add the image file if it was generated
+        if (imageUrl) {
+            try {
+                const imageRelPath = `public${imageUrl}`; // e.g. public/blog-images/slug.webp
+                execSync(`git add "${imageRelPath}"`, { cwd: feDir });
+            } catch { /* image might not exist if gen failed */ }
+        }
+
+        // Git add + commit each markdown file
         for (const saved of savedFiles) {
             try {
-                const feDir = path.resolve(__dirname, "..", "..", "FE");
                 const filename = `${saved.blog.slug}${saved.language.suffix}.md`;
                 const relPath = `content/blogs/${filename}`;
 
