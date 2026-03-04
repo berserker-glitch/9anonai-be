@@ -864,207 +864,6 @@ async function main(): Promise<void> {
         // Build context from RAG results
         const context = buildContext(sources);
 
-        // Step 1.5: Generate image using Gemini Pro Image via raw OpenRouter API
-        // We use fetch directly because the OpenAI SDK strips multimodal image parts
-        console.log(`   🎨 Generating image for topic...`);
-        let imageUrl = "";
-        try {
-            /**
-             * Generate a professional blog illustration using Gemini's image model.
-             * We call OpenRouter directly via fetch because the OpenAI SDK's
-             * message.content only captures text — Gemini returns images as
-             * multimodal parts (inline_data) which the SDK discards.
-             */
-            const imagePrompt = [
-                // --- Core directive: scene replication ---
-                `Create a single, hyper-realistic editorial photograph that tells the STORY of this blog article at a glance.`,
-                `Blog title: "${topic.titles.en}".`,
-                `Blog keywords: ${topic.keywords.join(", ")}.`,
-
-                // --- Scene composition & narrative ---
-                `SCENE DIRECTION: Reconstruct the exact real-world moment the article describes.`,
-                `Examples of what this means:`,
-                `• A divorce article → a woman sitting across from a lawyer at a desk, signing papers, her expression is conflicted; soft window light rakes across the table.`,
-                `• A labor rights article → a factory floor or open-plan office mid-dispute; a supervisor and a worker face each other, body language tense, coworkers watching in the background.`,
-                `• A real estate article → a young couple standing in the doorway of an empty apartment, the agent gesturing inside; golden-hour light floods the room.`,
-                `• A criminal law article → a dimly lit courtroom corridor; a defendant and their lawyer whispering urgently outside heavy wooden doors.`,
-                `Choose the most visually dramatic and emotionally resonant moment from the topic. Capture mid-action, not posed.`,
-
-                // --- Photographic technique ---
-                `CAMERA: Shot on a full-frame 35mm sensor. Focal length 35-85mm depending on scene intimacy.`,
-                `Use shallow depth of field (f/1.8–f/2.8) to isolate the subject from the environment. Background should be softly bokeh'd but still contextually readable.`,
-                `LIGHTING: Motivated natural light — window light, golden hour, or diffused overcast. Allow dramatic shadows and highlights. Avoid flat, even studio lighting.`,
-                `COLOR GRADE: Muted, desaturated warm tones — think Kodak Portra 400 film stock. Slight grain is acceptable. Blacks should be lifted slightly (cinematic log look).`,
-                `COMPOSITION: Use the rule of thirds or leading lines. Place the emotional anchor (a face, hands on a document, a gesture) at a power point. Include environmental storytelling in the frame edges.`,
-
-                // --- Moroccan identity (subtle) ---
-                `CASTING: All people in the scene must have North African / Moroccan facial features, skin tones, and hair textures. This is the ONLY culturally specific element. Everything else — clothing, setting, props — should be modern and universally relatable. No traditional garments, no ornate architecture, no flags, no calligraphy.`,
-
-                // --- Hard constraints ---
-                `ABSOLUTE RESTRICTIONS: Zero text, zero words, zero watermarks, zero logos, zero UI overlays, zero borders. The image must be a clean photograph with nothing overlaid.`,
-            ].join("\n");
-
-            const rawResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                    "HTTP-Referer": "https://github.com/moroccan-legal-ai",
-                    "X-Title": "9anon - Blog Image Generator",
-                },
-                body: JSON.stringify({
-                    model: "google/gemini-3-pro-image-preview",
-                    messages: [
-                        { role: "user", content: imagePrompt }
-                    ],
-                    modalities: ["image", "text"],
-                }),
-            });
-
-            const responseJson = await rawResponse.json() as any;
-
-            // Debug: log the response structure to understand the format
-            const messageObj = responseJson?.choices?.[0]?.message;
-            console.log(`   📦 Response keys: ${JSON.stringify(Object.keys(responseJson?.choices?.[0] || {}))}`);
-            console.log(`   📦 Message keys: ${JSON.stringify(Object.keys(messageObj || {}))}`);
-
-            let imageBuffer: Buffer | null = null;
-
-            // OpenRouter returns Gemini images in message.images array
-            // Each image object has: { image_url: { url: "data:image/png;base64,..." } }
-            if (messageObj?.images && Array.isArray(messageObj.images) && messageObj.images.length > 0) {
-                const imgObj = messageObj.images[0];
-                const imageDataUrl = imgObj?.image_url?.url;
-
-                if (imageDataUrl) {
-                    console.log(`   📸 Found image data URL (length: ${imageDataUrl.length})`);
-                    // Extract base64 from data URI
-                    const dataMatch = imageDataUrl.match(/^data:image\/[^;]+;base64,(.+)/s);
-                    if (dataMatch) {
-                        imageBuffer = Buffer.from(dataMatch[1], "base64");
-                    } else if (imageDataUrl.startsWith("http")) {
-                        // It's a regular URL, download it
-                        console.log(`   🔗 Downloading image from URL...`);
-                        const dlRes = await fetch(imageDataUrl);
-                        imageBuffer = Buffer.from(await dlRes.arrayBuffer());
-                    }
-                } else {
-                    console.warn(`   ⚠️ images[0] structure:`, JSON.stringify(imgObj).slice(0, 300));
-                }
-            }
-
-            // Format 1: OpenRouter multimodal content array
-            // content: [{type: "text", text: "..."}, {type: "image_url", image_url: {url: "data:image/png;base64,..."}}]
-            if (!imageBuffer && Array.isArray(messageObj?.content)) {
-                for (const part of messageObj.content) {
-                    // Check for image_url part with base64 data URI
-                    if (part.type === "image_url" && part.image_url?.url) {
-                        const dataMatch = part.image_url.url.match(/^data:image\/[^;]+;base64,(.+)/s);
-                        if (dataMatch) {
-                            console.log(`   📸 Found base64 in content array (image_url part)`);
-                            imageBuffer = Buffer.from(dataMatch[1], "base64");
-                            break;
-                        }
-                        // It's a regular URL, download it
-                        console.log(`   🔗 Found URL in content array: ${part.image_url.url.slice(0, 80)}...`);
-                        const dlRes = await fetch(part.image_url.url);
-                        imageBuffer = Buffer.from(await dlRes.arrayBuffer());
-                        break;
-                    }
-                    // Check for inline_data (Gemini native format sometimes passed through)
-                    if (part.inline_data?.data) {
-                        console.log(`   📸 Found inline_data part`);
-                        imageBuffer = Buffer.from(part.inline_data.data, "base64");
-                        break;
-                    }
-                }
-            }
-
-            // Format 2: content is a plain string (text with possible base64 or URL)
-            if (!imageBuffer && typeof messageObj?.content === "string" && messageObj.content.length > 0) {
-                const textContent = messageObj.content;
-                console.log(`   📦 Text content length: ${textContent.length}, preview: ${textContent.slice(0, 100)}...`);
-
-                // Check for data URI in the text
-                const dataUriMatch = textContent.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=\s]+)/);
-                if (dataUriMatch) {
-                    console.log(`   📸 Found data URI in text content`);
-                    imageBuffer = Buffer.from(dataUriMatch[1].replace(/\s/g, ""), "base64");
-                }
-
-                // Check for raw base64 (long string with no spaces)
-                if (!imageBuffer && textContent.length > 500 && !textContent.includes(" ")) {
-                    console.log(`   📸 Text looks like raw base64`);
-                    imageBuffer = Buffer.from(textContent.trim(), "base64");
-                }
-
-                // Check for URL
-                if (!imageBuffer) {
-                    const mdMatch = textContent.match(/!\[.*?\]\(([^)]+)\)/);
-                    const urlMatch = textContent.match(/https?:\/\/[^\s)]+/);
-                    const url = mdMatch ? mdMatch[1] : urlMatch ? urlMatch[0] : "";
-                    if (url) {
-                        console.log(`   🔗 Found URL in text: ${url.slice(0, 80)}...`);
-                        const dlRes = await fetch(url);
-                        imageBuffer = Buffer.from(await dlRes.arrayBuffer());
-                    }
-                }
-            }
-
-            if (imageBuffer && imageBuffer.length > 100) {
-                // Ensure output directory exists
-                const imagesDir = path.resolve(__dirname, "..", "..", "FE", "public", "blog-images");
-                if (!fs.existsSync(imagesDir)) {
-                    fs.mkdirSync(imagesDir, { recursive: true });
-                }
-
-                const finalImagePath = path.join(imagesDir, `${topic.slug}.webp`);
-                const logoPath = path.resolve(__dirname, "..", "..", "FE", "public", "Layer 3.png");
-
-                /**
-                 * Composite the 9anon logo onto the bottom-left corner.
-                 * Logo is resized to 6% of image width, with 40% opacity and 20px padding.
-                 * Output as WebP for 60-80% smaller file size vs PNG.
-                 */
-                const mainImage = sharp(imageBuffer);
-                const metadata = await mainImage.metadata();
-                const imgWidth = metadata.width || 800;
-                const imgHeight = metadata.height || 600;
-                const logoSize = Math.round(imgWidth * 0.06); // 6% of image width — small watermark
-                const padding = 20; // px padding from bottom-left edges
-
-                // Resize logo and lower opacity to 40%
-                const resizedLogo = await sharp(logoPath)
-                    .resize(logoSize)
-                    .ensureAlpha()
-                    .linear(0.4, 0) // Scale all channels including alpha by 0.4 for 40% opacity
-                    .toBuffer();
-
-                // Get resized logo dimensions for precise placement
-                const logoMeta = await sharp(resizedLogo).metadata();
-                const logoHeight = logoMeta.height || logoSize;
-
-                // Composite logo and output as WebP for SEO-optimal file size
-                await sharp(imageBuffer)
-                    .composite([{
-                        input: resizedLogo,
-                        left: padding,
-                        top: imgHeight - logoHeight - padding,
-                    }])
-                    .webp({ quality: 85 })
-                    .toFile(finalImagePath);
-
-                imageUrl = `/blog-images/${topic.slug}.webp`;
-                console.log(`   ✅ Image saved as WebP to ${imageUrl} (${(imageBuffer.length / 1024).toFixed(1)} KB raw → WebP)`);
-            } else {
-                console.warn(`   ⚠️ Could not extract a valid image from the response.`);
-                // Log the full structure for debugging
-                console.warn(`   📝 Full response structure:`, JSON.stringify(responseJson?.choices?.[0]?.message || {}).slice(0, 500));
-            }
-        } catch (imageErr) {
-            console.error(`   ❌ Failed to generate/composite image:`, imageErr);
-        }
-
         // Step 2: SERP competitor analysis (once per topic, shared across languages)
         const serpBrief = await analyzeSERPCompetitors(topic);
 
@@ -1072,7 +871,8 @@ async function main(): Promise<void> {
         // Image generation is deferred until all languages succeed — this avoids
         // wasting expensive image API calls if articles fail validation.
         let imageUrl = "";
-        const savedBlogs: Array<{ blog: GeneratedBlog; language: typeof LANGUAGES[0] }> = [];
+        const savedFiles: Array<{ filepath: string; language: typeof LANGUAGES[0]; blog: GeneratedBlog }> = [];
+
         for (let langIdx = 0; langIdx < LANGUAGES.length; langIdx++) {
             const language = LANGUAGES[langIdx];
 
@@ -1096,19 +896,19 @@ async function main(): Promise<void> {
                     const failures = validateArticleQuality(generated.content, language.code);
 
                     if (failures.length === 0) {
-                        console.log(`      \u2705 Quality check passed (attempt ${attempt})`);
+                        console.log(`      ✅ Quality check passed (attempt ${attempt})`);
                         blog = generated;
                         break;
                     }
 
-                    console.log(`      \u26a0\ufe0f Quality check failed (attempt ${attempt}/${MAX_RETRIES + 1}):`);
+                    console.log(`      ⚠️ Quality check failed (attempt ${attempt}/${MAX_RETRIES + 1}):`);
                     failures.forEach(f => console.log(`         - ${f}`));
 
                     if (attempt <= MAX_RETRIES) {
-                        console.log(`      \ud83d\udd04 Retrying with stricter instructions...`);
+                        console.log(`      🔄 Retrying with stricter instructions...`);
                     } else {
                         // Accept the last attempt even with failures (best effort)
-                        console.log(`      \u26a0\ufe0f Max retries reached — saving best effort article`);
+                        console.log(`      ⚠️ Max retries reached — saving best effort article`);
                         blog = generated;
                     }
                 }
@@ -1118,29 +918,13 @@ async function main(): Promise<void> {
                     saveBlog(blog, language, outputDir);
                     successCount++;
 
-                    /**
-                     * Auto-commit the newly generated blog to Git.
-                     * Executes git add and commit within the FE directory.
-                     */
-                    try {
-                        const feDir = path.resolve(__dirname, "..", "..", "FE");
-                        const filename = `${blog.slug}${language.suffix}.md`;
-                        // Using forward slashes for relative path within FE directory
-                        const relPath = `content/blogs/${filename}`;
-
-                        // Add the specific newly created blog file
-                        execSync(`git add "${relPath}"`, { cwd: feDir });
-
-                        // Map language code to the format required by the user (eng, fr, ar)
-                        const langStr = language.code === 'en' ? 'eng' : (language.code === 'fr' ? 'fr' : 'ar');
-                        const safeSlug = blog.slug.replace(/"/g, '\\"');
-
-                        // Commit with the required message format
-                        execSync(`git commit -m "feat(blog): added blog ${safeSlug} in ${langStr}"`, { cwd: feDir, stdio: 'pipe' });
-                        console.log(`      🚀 Git committed: ${filename}`);
-                    } catch (gitError) {
-                        console.warn(`      ⚠️ Git commit skipped or failed for ${blog.slug} (might be unchanged)`);
-                    }
+                    // Track saved file for image path update later
+                    const filename = `${blog.slug}${language.suffix}.md`;
+                    savedFiles.push({
+                        filepath: path.join(outputDir, filename),
+                        language,
+                        blog,
+                    });
                 }
 
                 // Add a small delay between API calls to avoid rate limiting
@@ -1148,6 +932,239 @@ async function main(): Promise<void> {
             } catch (error) {
                 console.error(`      ❌ [${language.name}] Failed:`, error);
                 failCount++;
+            }
+        }
+
+        // Step 4: Generate image AFTER all articles are saved
+        // Only generate if at least one article was saved successfully
+        if (savedFiles.length > 0) {
+            console.log(`   🎨 Generating image for topic...`);
+            try {
+                /**
+                 * Generate a professional blog illustration using Gemini's image model.
+                 * We call OpenRouter directly via fetch because the OpenAI SDK's
+                 * message.content only captures text — Gemini returns images as
+                 * multimodal parts (inline_data) which the SDK discards.
+                 */
+                const imagePrompt = [
+                    // --- Core directive: scene replication ---
+                    `Create a single, hyper-realistic editorial photograph that tells the STORY of this blog article at a glance.`,
+                    `Blog title: "${topic.titles.en}".`,
+                    `Blog keywords: ${topic.keywords.join(", ")}.`,
+
+                    // --- Scene composition & narrative ---
+                    `SCENE DIRECTION: Reconstruct the exact real-world moment the article describes.`,
+                    `Examples of what this means:`,
+                    `• A divorce article → a woman sitting across from a lawyer at a desk, signing papers, her expression is conflicted; soft window light rakes across the table.`,
+                    `• A labor rights article → a factory floor or open-plan office mid-dispute; a supervisor and a worker face each other, body language tense, coworkers watching in the background.`,
+                    `• A real estate article → a young couple standing in the doorway of an empty apartment, the agent gesturing inside; golden-hour light floods the room.`,
+                    `• A criminal law article → a dimly lit courtroom corridor; a defendant and their lawyer whispering urgently outside heavy wooden doors.`,
+                    `Choose the most visually dramatic and emotionally resonant moment from the topic. Capture mid-action, not posed.`,
+
+                    // --- Photographic technique ---
+                    `CAMERA: Shot on a full-frame 35mm sensor. Focal length 35-85mm depending on scene intimacy.`,
+                    `Use shallow depth of field (f/1.8–f/2.8) to isolate the subject from the environment. Background should be softly bokeh'd but still contextually readable.`,
+                    `LIGHTING: Motivated natural light — window light, golden hour, or diffused overcast. Allow dramatic shadows and highlights. Avoid flat, even studio lighting.`,
+                    `COLOR GRADE: Muted, desaturated warm tones — think Kodak Portra 400 film stock. Slight grain is acceptable. Blacks should be lifted slightly (cinematic log look).`,
+                    `COMPOSITION: Use the rule of thirds or leading lines. Place the emotional anchor (a face, hands on a document, a gesture) at a power point. Include environmental storytelling in the frame edges.`,
+
+                    // --- Moroccan identity (subtle) ---
+                    `CASTING: All people in the scene must have North African / Moroccan facial features, skin tones, and hair textures. This is the ONLY culturally specific element. Everything else — clothing, setting, props — should be modern and universally relatable. No traditional garments, no ornate architecture, no flags, no calligraphy.`,
+
+                    // --- Hard constraints ---
+                    `ABSOLUTE RESTRICTIONS: Zero text, zero words, zero watermarks, zero logos, zero UI overlays, zero borders. The image must be a clean photograph with nothing overlaid.`,
+                ].join("\n");
+
+                const rawResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                        "HTTP-Referer": "https://github.com/moroccan-legal-ai",
+                        "X-Title": "9anon - Blog Image Generator",
+                    },
+                    body: JSON.stringify({
+                        model: "google/gemini-3-pro-image-preview",
+                        messages: [
+                            { role: "user", content: imagePrompt }
+                        ],
+                        modalities: ["image", "text"],
+                    }),
+                });
+
+                const responseJson = await rawResponse.json() as any;
+
+                // Debug: log the response structure to understand the format
+                const messageObj = responseJson?.choices?.[0]?.message;
+                console.log(`   📦 Response keys: ${JSON.stringify(Object.keys(responseJson?.choices?.[0] || {}))}`);
+                console.log(`   📦 Message keys: ${JSON.stringify(Object.keys(messageObj || {}))}`);
+
+                let imageBuffer: Buffer | null = null;
+
+                // OpenRouter returns Gemini images in message.images array
+                // Each image object has: { image_url: { url: "data:image/png;base64,..." } }
+                if (messageObj?.images && Array.isArray(messageObj.images) && messageObj.images.length > 0) {
+                    const imgObj = messageObj.images[0];
+                    const imageDataUrl = imgObj?.image_url?.url;
+
+                    if (imageDataUrl) {
+                        console.log(`   📸 Found image data URL (length: ${imageDataUrl.length})`);
+                        // Extract base64 from data URI
+                        const dataMatch = imageDataUrl.match(/^data:image\/[^;]+;base64,(.+)/s);
+                        if (dataMatch) {
+                            imageBuffer = Buffer.from(dataMatch[1], "base64");
+                        } else if (imageDataUrl.startsWith("http")) {
+                            // It's a regular URL, download it
+                            console.log(`   🔗 Downloading image from URL...`);
+                            const dlRes = await fetch(imageDataUrl);
+                            imageBuffer = Buffer.from(await dlRes.arrayBuffer());
+                        }
+                    } else {
+                        console.warn(`   ⚠️ images[0] structure:`, JSON.stringify(imgObj).slice(0, 300));
+                    }
+                }
+
+                // Format 1: OpenRouter multimodal content array
+                // content: [{type: "text", text: "..."}, {type: "image_url", image_url: {url: "data:image/png;base64,..."}}]
+                if (!imageBuffer && Array.isArray(messageObj?.content)) {
+                    for (const part of messageObj.content) {
+                        // Check for image_url part with base64 data URI
+                        if (part.type === "image_url" && part.image_url?.url) {
+                            const dataMatch = part.image_url.url.match(/^data:image\/[^;]+;base64,(.+)/s);
+                            if (dataMatch) {
+                                console.log(`   📸 Found base64 in content array (image_url part)`);
+                                imageBuffer = Buffer.from(dataMatch[1], "base64");
+                                break;
+                            }
+                            // It's a regular URL, download it
+                            console.log(`   🔗 Found URL in content array: ${part.image_url.url.slice(0, 80)}...`);
+                            const dlRes = await fetch(part.image_url.url);
+                            imageBuffer = Buffer.from(await dlRes.arrayBuffer());
+                            break;
+                        }
+                        // Check for inline_data (Gemini native format sometimes passed through)
+                        if (part.inline_data?.data) {
+                            console.log(`   📸 Found inline_data part`);
+                            imageBuffer = Buffer.from(part.inline_data.data, "base64");
+                            break;
+                        }
+                    }
+                }
+
+                // Format 2: content is a plain string (text with possible base64 or URL)
+                if (!imageBuffer && typeof messageObj?.content === "string" && messageObj.content.length > 0) {
+                    const textContent = messageObj.content;
+                    console.log(`   📦 Text content length: ${textContent.length}, preview: ${textContent.slice(0, 100)}...`);
+
+                    // Check for data URI in the text
+                    const dataUriMatch = textContent.match(/data:image\/[^;]+;base664,([A-Za-z0-9+/=\s]+)/);
+                    if (dataUriMatch) {
+                        console.log(`   📸 Found data URI in text content`);
+                        imageBuffer = Buffer.from(dataUriMatch[1].replace(/\s/g, ""), "base64");
+                    }
+
+                    // Check for raw base64 (long string with no spaces)
+                    if (!imageBuffer && textContent.length > 500 && !textContent.includes(" ")) {
+                        console.log(`   📸 Text looks like raw base64`);
+                        imageBuffer = Buffer.from(textContent.trim(), "base64");
+                    }
+
+                    // Check for URL
+                    if (!imageBuffer) {
+                        const mdMatch = textContent.match(/!\[.*?\]\(([^)]+)\)/);
+                        const urlMatch = textContent.match(/https?:\/\/[^\s)]+/);
+                        const url = mdMatch ? mdMatch[1] : urlMatch ? urlMatch[0] : "";
+                        if (url) {
+                            console.log(`   🔗 Found URL in text: ${url.slice(0, 80)}...`);
+                            const dlRes = await fetch(url);
+                            imageBuffer = Buffer.from(await dlRes.arrayBuffer());
+                        }
+                    }
+                }
+
+                if (imageBuffer && imageBuffer.length > 100) {
+                    // Ensure output directory exists
+                    const imagesDir = path.resolve(__dirname, "..", "..", "FE", "public", "blog-images");
+                    if (!fs.existsSync(imagesDir)) {
+                        fs.mkdirSync(imagesDir, { recursive: true });
+                    }
+
+                    const finalImagePath = path.join(imagesDir, `${topic.slug}.webp`);
+                    const logoPath = path.resolve(__dirname, "..", "..", "FE", "public", "Layer 3.png");
+
+                    /**
+                     * Composite the 9anon logo onto the bottom-left corner.
+                     * Logo is resized to 6% of image width, with 40% opacity and 20px padding.
+                     * Output as WebP for 60-80% smaller file size vs PNG.
+                     */
+                    const mainImage = sharp(imageBuffer);
+                    const metadata = await mainImage.metadata();
+                    const imgWidth = metadata.width || 800;
+                    const imgHeight = metadata.height || 600;
+                    const logoSize = Math.round(imgWidth * 0.06); // 6% of image width — small watermark
+                    const padding = 20; // px padding from bottom-left edges
+
+                    // Resize logo and lower opacity to 40%
+                    const resizedLogo = await sharp(logoPath)
+                        .resize(logoSize)
+                        .ensureAlpha()
+                        .linear(0.4, 0) // Scale all channels including alpha by 0.4 for 40% opacity
+                        .toBuffer();
+
+                    // Get resized logo dimensions for precise placement
+                    const logoMeta = await sharp(resizedLogo).metadata();
+                    const logoHeight = logoMeta.height || logoSize;
+
+                    // Composite logo and output as WebP for SEO-optimal file size
+                    await sharp(imageBuffer)
+                        .composite([{
+                            input: resizedLogo,
+                            left: padding,
+                            top: imgHeight - logoHeight - padding,
+                        }])
+                        .webp({ quality: 85 })
+                        .toFile(finalImagePath);
+
+                    imageUrl = `/blog-images/${topic.slug}.webp`;
+                    console.log(`   ✅ Image saved as WebP to ${imageUrl}`);
+
+                    // Retroactively update all saved markdown files with the image path
+                    for (const saved of savedFiles) {
+                        try {
+                            let mdContent = fs.readFileSync(saved.filepath, "utf-8");
+                            // Replace the empty image field in frontmatter
+                            mdContent = mdContent.replace(/^image: ""\s*$/m, `image: "${imageUrl}"`);
+                            fs.writeFileSync(saved.filepath, mdContent, "utf-8");
+                            console.log(`      📝 Updated image path in: ${path.basename(saved.filepath)}`);
+                        } catch (updateErr) {
+                            console.warn(`      ⚠️ Failed to update image in ${path.basename(saved.filepath)}`);
+                        }
+                    }
+                } else {
+                    console.warn(`   ⚠️ Could not extract a valid image from the response.`);
+                    console.warn(`   📝 Full response structure:`, JSON.stringify(responseJson?.choices?.[0]?.message || {}).slice(0, 500));
+                }
+            } catch (imageErr) {
+                console.error(`   ❌ Failed to generate/composite image:`, imageErr);
+            }
+        }
+
+        // Step 5: Git commit all saved files for this topic
+        for (const saved of savedFiles) {
+            try {
+                const feDir = path.resolve(__dirname, "..", "..", "FE");
+                const filename = `${saved.blog.slug}${saved.language.suffix}.md`;
+                const relPath = `content/blogs/${filename}`;
+
+                execSync(`git add "${relPath}"`, { cwd: feDir });
+
+                const langStr = saved.language.code === 'en' ? 'eng' : (saved.language.code === 'fr' ? 'fr' : 'ar');
+                const safeSlug = saved.blog.slug.replace(/"/g, '\\"');
+
+                execSync(`git commit -m "feat(blog): added blog ${safeSlug} in ${langStr}"`, { cwd: feDir, stdio: 'pipe' });
+                console.log(`      🚀 Git committed: ${filename}`);
+            } catch (gitError) {
+                console.warn(`      ⚠️ Git commit skipped or failed for ${path.basename(saved.filepath)}`);
             }
         }
 
