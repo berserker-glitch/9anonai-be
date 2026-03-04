@@ -606,18 +606,24 @@ WRITING GUIDELINES:
 4. Include practical examples, real-world scenarios, and step-by-step procedures
 5. Mention relevant Moroccan legal institutions, courts, and administrative procedures
 6. Cite specific article numbers and law names from the provided context AND your own knowledge
-7. Target length: 2000-3000 words (comprehensive, in-depth article)
+7. Target length: 2000-3000 words — this is NON-NEGOTIABLE, write AT LEAST 2000 words
 8. Use proper markdown formatting throughout — bold key terms, use bullet lists for procedures
 9. NEVER use emojis
 10. Include the current year (2026) naturally for freshness signals
 11. Use the E-E-A-T framework: demonstrate Experience, Expertise, Authoritativeness, Trustworthiness
 
-ARTICLE STRUCTURE (MANDATORY — follow this exactly):
-1. Hook Introduction (200-300 words): Start with a compelling real-world scenario or question that the reader identifies with. State what they will learn.
-2. Legal Foundation (300-400 words): Cite the primary laws, codes, and articles that govern this topic.
-3. Practical Guide (400-500 words): Step-by-step procedures, required documents, timelines, costs.
-4. Key Provisions Explained (400-500 words): Break down the most important legal provisions in plain language.
-5. Common Mistakes & How to Avoid Them (200-300 words): Practical pitfalls people encounter.
+CRITICAL LENGTH REQUIREMENT:
+- You MUST write at least 2000 words. Articles under 1500 words are UNACCEPTABLE.
+- Each of the 6 mandatory sections below has a MINIMUM word count. Follow it.
+- If you feel you are running short, add more examples, more case law, more practical detail.
+- NEVER conclude early. Always pad with real, useful legal content if you are under the target.
+
+ARTICLE STRUCTURE (MANDATORY — follow this exactly, meet each section's word minimum):
+1. Hook Introduction (250-400 words minimum): Start with a compelling real-world scenario or question that the reader identifies with. State what they will learn.
+2. Legal Foundation (350-500 words minimum): Cite the primary laws, codes, and articles that govern this topic.
+3. Practical Guide (400-600 words minimum): Step-by-step procedures, required documents, timelines, costs.
+4. Key Provisions Explained (400-600 words minimum): Break down the most important legal provisions in plain language.
+5. Common Mistakes & How to Avoid Them (250-400 words minimum): Practical pitfalls people encounter.
 6. Conclusion with Key Takeaways (200 words): Summarize in bullet points.
 ${serpSection}
 ${linkingSection}
@@ -880,52 +886,33 @@ async function main(): Promise<void> {
                 // Build internal link bank for this language
                 const linkBank = buildLinkBank(outputDir, topic.slug, language.code);
 
-                // Quality gate: generate → validate → retry up to 2 times if needed
-                const MAX_RETRIES = 2;
-                let blog: GeneratedBlog | null = null;
-                let attempt = 0;
+                // Single generation call — no retries to save credits.
+                // The prompt is forceful enough about length requirements.
+                const blog = await generateBlogInLanguage(
+                    topic, language, context, topicIdx + 1, langIdx,
+                    imageUrl, serpBrief, linkBank
+                );
 
-                while (attempt <= MAX_RETRIES) {
-                    attempt++;
-                    const generated = await generateBlogInLanguage(
-                        topic, language, context, topicIdx + 1, langIdx,
-                        imageUrl, serpBrief, linkBank
-                    );
-
-                    // Run quality validation
-                    const failures = validateArticleQuality(generated.content, language.code);
-
-                    if (failures.length === 0) {
-                        console.log(`      ✅ Quality check passed (attempt ${attempt})`);
-                        blog = generated;
-                        break;
-                    }
-
-                    console.log(`      ⚠️ Quality check failed (attempt ${attempt}/${MAX_RETRIES + 1}):`);
-                    failures.forEach(f => console.log(`         - ${f}`));
-
-                    if (attempt <= MAX_RETRIES) {
-                        console.log(`      🔄 Retrying with stricter instructions...`);
-                    } else {
-                        // Accept the last attempt even with failures (best effort)
-                        console.log(`      ⚠️ Max retries reached — saving best effort article`);
-                        blog = generated;
-                    }
+                // Run quality validation as soft warnings (log but always save)
+                const warnings = validateArticleQuality(blog.content, language.code);
+                if (warnings.length === 0) {
+                    console.log(`      ✅ Quality check passed`);
+                } else {
+                    console.log(`      ⚠️ Quality warnings (saving anyway):`);
+                    warnings.forEach(w => console.log(`         - ${w}`));
                 }
 
-                if (blog) {
-                    blog.sources = sources.map(s => s.document_name || s.source_file || "Unknown");
-                    saveBlog(blog, language, outputDir);
-                    successCount++;
+                blog.sources = sources.map(s => s.document_name || s.source_file || "Unknown");
+                saveBlog(blog, language, outputDir);
+                successCount++;
 
-                    // Track saved file for image path update later
-                    const filename = `${blog.slug}${language.suffix}.md`;
-                    savedFiles.push({
-                        filepath: path.join(outputDir, filename),
-                        language,
-                        blog,
-                    });
-                }
+                // Track saved file for image path update later
+                const filename = `${blog.slug}${language.suffix}.md`;
+                savedFiles.push({
+                    filepath: path.join(outputDir, filename),
+                    language,
+                    blog,
+                });
 
                 // Add a small delay between API calls to avoid rate limiting
                 await new Promise(resolve => setTimeout(resolve, 1500));
