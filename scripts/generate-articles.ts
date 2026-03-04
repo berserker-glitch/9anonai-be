@@ -589,10 +589,12 @@ Answer ALL "People Also Ask" questions within the article body naturally.` : "";
     // Build the internal linking section if available
     const linkingSection = linkBank ? `
 INTERNAL LINKING:
+Here are related published articles you MUST link to.
 ${linkBank}
 
-RULES: Naturally embed 2-3 internal links using markdown format [anchor text](/blog/slug).
-Only link where contextually relevant. Do NOT force links.` : "";
+RULES: Naturally embed 2-3 of these internal links using markdown format [anchor text](/blog/slug).
+Only link where contextually relevant.
+CRITICAL: ABSOLUTELY NEVER link to a blog slug that is not in the list above. DO NOT invent or hallucinate URLs.` : "";
 
     const systemPrompt = `You are an expert legal writer specializing in Moroccan law.
 Your task is to write a professional, educational, SEO-optimized blog article that will RANK #1 on Google.
