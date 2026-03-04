@@ -207,6 +207,10 @@ DESCRIPTION RULES (for all 3 languages):
 - End with an action or benefit, not a trailing sentence
 - Never start with "A comprehensive guide" — that's a CTR killer
 
+CATEGORY RULES:
+- Assign exactly ONE category from this list: "family-law", "labor-law", "criminal-law", "real-estate", "business-law", "digital-law", "immigration", "consumer-rights", "administrative-law", "tax-law", "traffic-law"
+- Choose the most specific matching category
+
 Return ONLY a valid JSON array with exactly this structure:
 [
   {
@@ -223,7 +227,8 @@ Return ONLY a valid JSON array with exactly this structure:
     },
     "searchQuery": "Arabic search query for legal database lookup",
     "keywords": ["keyword1", "keyword2", "keyword3"],
-    "trendReason": "1-sentence explanation of why this topic is trending"
+    "trendReason": "1-sentence explanation of why this topic is trending",
+    "category": "one-of-the-categories-above"
   }
 ]`;
 
@@ -280,6 +285,12 @@ interface GeneratedBlog {
     image: string;
     sources: string[];
     generatedAt: Date;
+    /** SEO keywords for meta tags */
+    keywords?: string[];
+    /** Legal category for filtering */
+    category?: string;
+    /** Key takeaways for rich snippets */
+    keyTakeaways?: string[];
 }
 
 /**
@@ -343,6 +354,10 @@ interface BlogTopic {
     descriptions: { ar: string; en: string; fr: string };
     searchQuery: string;
     keywords: string[];
+    /** Assigned legal category for frontmatter grouping */
+    category?: string;
+    /** Why this topic was chosen (from trend analysis) */
+    trendReason?: string;
 }
 
 /**
