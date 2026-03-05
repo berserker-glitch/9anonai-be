@@ -16,6 +16,7 @@ model User {
   personalization String? @db.Text
   marketingSource String?
   isOnboarded     Boolean   @default(false)
+  feedbackDismissed Boolean @default(false) // Whether user has dismissed the feedback form modal
   role          String    @default("user")  // "user" | "superadmin"
   createdAt     DateTime  @default(now())
   chats         Chat[]
