@@ -184,7 +184,8 @@ router.get("/me", authenticate, asyncHandler(async (req: Request, res: Response)
             role: true,
             personalization: true,
             isOnboarded: true,
-            marketingSource: true
+            marketingSource: true,
+            feedbackDismissed: true
         }
     });
 
@@ -309,6 +310,27 @@ router.post("/change-password", authenticate, asyncHandler(async (req: Request, 
     logger.info(`[AUTH] Password changed for user ${userId}`);
 
     res.json({ message: "Password changed successfully" });
+}));
+
+/**
+ * PATCH /api/auth/dismiss-feedback
+ * Marks the feedback modal as dismissed for the authenticated user.
+ * Persists the dismissal in the database so it won't show again.
+ *
+ * @route PATCH /api/auth/dismiss-feedback
+ * @security Bearer
+ * @returns {object} 200 - Success confirmation
+ */
+router.patch("/dismiss-feedback", authenticate, asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId!;
+
+    await prisma.user.update({
+        where: { id: userId },
+        data: { feedbackDismissed: true }
+    });
+
+    logger.info(`[AUTH] Feedback dismissed for user ${userId}`);
+    res.json({ success: true });
 }));
 
 export default router;
