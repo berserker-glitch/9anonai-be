@@ -44,6 +44,27 @@ const FeedbackSchema = zod_1.z.object({
 // Chat CRUD Routes
 // ─────────────────────────────────────────────────────────────────────────────
 /**
+ * GET /api/chats/message-count
+ * Returns the total number of messages (user + assistant) across all
+ * chats owned by the authenticated user. Used to determine eligibility
+ * for the feedback modal (threshold: 20+ messages).
+ *
+ * @route GET /api/chats/message-count
+ * @security Bearer
+ * @returns {object} 200 - { count: number }
+ */
+router.get("/message-count", auth_1.authenticate, (0, error_handler_1.asyncHandler)(async (req, res) => {
+    const userId = req.userId;
+    // Count all messages across user's chats (both user and assistant roles)
+    const count = await prisma_1.prisma.message.count({
+        where: {
+            chat: { userId }
+        }
+    });
+    (0, logger_1.logDbOperation)("count", "Message", true, `User ${userId} has ${count} total messages`);
+    res.json({ count });
+}));
+/**
  * GET /api/chats
  * Lists all chats for the authenticated user.
  * Supports search filtering by title.
