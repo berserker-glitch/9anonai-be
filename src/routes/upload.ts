@@ -49,6 +49,7 @@ const ALLOWED_MIME_TYPES = [
     "application/pdf",
     "text/plain",
     "text/markdown",
+    "text/csv",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ] as const;
@@ -275,6 +276,37 @@ router.delete("/:id", authenticate, asyncHandler(async (req: Request, res: Respo
     logDbOperation("delete", "UserFile", true, `File ${id} deleted by ${userId}`);
 
     res.json({ success: true });
+}));
+
+/**
+ * GET /api/upload/files/:id/download
+ * Downloads a specific uploaded file.
+ * 
+ * @route GET /api/upload/files/:id/download
+ * @security Bearer
+ * @param {string} req.params.id - File ID
+ * @returns {stream} The file content
+ */
+router.get("/files/:id/download", authenticate, asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId!;
+    const { id } = req.params;
+
+    const file = await prisma.userFile.findUnique({ where: { id, userId } });
+    if (!file) {
+        throw HttpErrors.notFound("File");
+    }
+
+    const filepath = path.join(__dirname, "../../", file.path);
+    if (!fs.existsSync(filepath)) {
+        logger.error(`[UPLOAD] File missing from disk: ${filepath}`);
+        throw HttpErrors.notFound("File not found on disk");
+    }
+
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(file.originalName)}"`);
+    res.setHeader("Content-Type", file.mimetype);
+
+    const fileStream = fs.createReadStream(filepath);
+    fileStream.pipe(res);
 }));
 
 export default router;
