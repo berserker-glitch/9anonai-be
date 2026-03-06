@@ -43,6 +43,7 @@ model Message {
   sources   String?  @db.Text
   attachmentUrl String? // Link to generated PDF
   attachmentName String? 
+  files         String?  @db.Text // JSON array: [{id, url, name, mimetype, size}]
   feedback  String?  // "like" | "dislike" | null
   parentId  String?  // For regeneration versioning
   version   Int      @default(1)
