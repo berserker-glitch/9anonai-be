@@ -43,3 +43,5 @@ next-env.d.ts
 /data/vector_store
 /data/rag_query.py
 
+# User uploads and generated files
+/uploads
