@@ -36,6 +36,7 @@ const AddMessageSchema = z.object({
     parentId: z.string().optional(),
     attachmentUrl: z.string().optional(),
     attachmentName: z.string().optional(),
+    files: z.string().optional(),
 });
 
 /**
@@ -332,6 +333,7 @@ router.post("/:id/messages", authenticate, asyncHandler(async (req: Request, res
             sources: sources,
             attachmentUrl: messageData.attachmentUrl || null,
             attachmentName: messageData.attachmentName || null,
+            files: messageData.files || null,
             parentId: messageData.parentId || undefined,
             version,
             isActive: true,
