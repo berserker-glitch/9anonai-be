@@ -834,6 +834,62 @@ ${keywordsYaml}${categoryYaml}${keyTakeawaysYaml ? keyTakeawaysYaml + "\n" : ""}
 }
 
 /**
+ * FIXED MASTER VISUAL STYLE (Brand Consistency)
+ * 
+ * These parameters are injected into EVERY image prompt regardless of the topic
+ * to ensure a consistent, premium brand identity across the entire blog.
+ */
+const MASTER_VISUAL_STYLE = {
+    camera: "Full-frame 35mm, 35-85mm focal length. Shallow depth of field (f/1.8). Documentary photography style.",
+    lighting: "Natural motivated window light, high contrast with dramatic shadows. Golden hour or soft overcast.",
+    color: "Warm cinematic tones, Kodak Portra 400 feel. Slight film grain. Deep blacks and rich midtones.",
+    composition: "Rule of thirds. Emotional anchor at a power point. Authentic Moroccan modern setting.",
+    restrictions: "ABSOLUTE RESTRICTIONS: ZERO text, words, watermarks, logos, UI overlays, or borders. Pure photograph only.",
+};
+
+/**
+ * Step 4a: Visual Scene Synthesis
+ * 
+ * Translates the blog's legal context into a highly detailed, representative
+ * visual scene description that the image model can then "recreate".
+ */
+async function generateVisualSceneDescription(topic: BlogTopic, summary: string, takeaways: string[]): Promise<string> {
+    const systemPrompt = `You are a creative director for a premium legal magazine.
+Your job is to translate a specific Moroccan legal topic into a RECOGNIZABLE, REPRODUCIBLE physical scene.
+
+The goal is to move away from generic "man at desk" or "lawyer talking" shots and instead show a "recreated situation"
+that a person experiencing this legal issue would actually find themselves in.
+
+RULES:
+- Focus on ENVIRONMENTAL STORYTELLING.
+- Describe people in authentic, mid-action moments (not looking at camera).
+- Use specific Moroccan urban or interior details (modern Casablanca offices, Rabat coffee shops, modern glass apartments).
+- Avoid traditional or cliché "tourist" Moroccan architecture (no arches, mosaics, or djellabas). Focus on MODERN Morocco.
+- Describe the emotion, the lighting, and the physical props (documents, specific tech, environmental markers).
+
+TOPIC: "${topic.titles.en}"
+SUMMARY: ${summary}
+KEY TAKEAWAYS: ${takeaways.join(". ")}
+CATEGORY: ${topic.category || "General"}
+
+Return ONLY a 2-3 sentence visual scene description — vivid, physical, and detailed.`;
+
+    try {
+        const response = await client.chat.completions.create({
+            model: "google/gemini-2.0-flash-001",
+            messages: [{ role: "user", content: systemPrompt }],
+            max_tokens: 300,
+            temperature: 0.7,
+        });
+
+        return response.choices[0]?.message?.content?.trim() || "A professional in a modern Moroccan setting focused on legal documentation.";
+    } catch (error) {
+        console.error("   ⚠️ Scene synthesis failed, using fallback:", error);
+        return "A professional in a modern Moroccan setting focused on legal documentation.";
+    }
+}
+
+/**
  * Main execution function
  * Generates all 8 blog articles in 3 languages and saves them
  */
@@ -968,38 +1024,29 @@ async function main(): Promise<void> {
                     ? articleKeyTakeaways.slice(0, 3).join(". ")
                     : articleDescription;
 
+                // Step 4a: Synthesize the specific visual scene from content
+                console.log(`      🎨 [Scene Synthesis] Creating representative situation...`);
+                const sceneDescription = await generateVisualSceneDescription(topic, articleDescription, articleKeyTakeaways);
+                console.log(`      🎨 [Scene Description]: "${sceneDescription.slice(0, 100)}..."`);
+
+                // Step 4b: Assemble the master prompt combining fixed style + dynamic scene
                 const imagePrompt = [
-                    // --- Core directive: content-aware scene ---
-                    `Create a single, photorealistic editorial photograph for a legal blog article.`,
-                    `The image must visually represent THIS SPECIFIC article:`,
+                    // --- Purpose ---
+                    `Create a single, photorealistic editorial photograph for this legal blog article: "${topic.titles.en}".`,
                     ``,
-                    `ARTICLE TITLE: "${topic.titles.en}"`,
-                    `ARTICLE SUMMARY: ${articleDescription}`,
-                    `KEY POINTS: ${articleContext}`,
-                    `KEYWORDS: ${topic.keywords.join(", ")}`,
+                    // --- Dynamic Scene (The "What" - Recreated Situation) ---
+                    `REPRESENTATIVE SCENE (Recreated Situation):`,
+                    sceneDescription,
                     ``,
-
-                    // --- Scene composition: derive from actual content ---
-                    `SCENE DIRECTION: Based on the article summary and key points above, create a SPECIFIC scene that visually embodies the core message.`,
-                    `Show a real moment that a reader of this article would recognize — people in a relevant professional or legal setting, interacting with documents, devices, or institutional environments that match the topic.`,
-                    `The scene should feel like documentary photography — authentic, mid-action, unstaged.`,
-                    `Choose the most visually dramatic moment from the topic. Capture motion, expression, and environment.`,
+                    // --- Master Visual Style (The "How" - Brand Consistency) ---
+                    `TECHNICAL STYLE (Fixed Brand Identity):`,
+                    `CAMERA: ${MASTER_VISUAL_STYLE.camera}`,
+                    `LIGHTING: ${MASTER_VISUAL_STYLE.lighting}`,
+                    `COLOR/FILM: ${MASTER_VISUAL_STYLE.color}`,
+                    `COMPOSITION: ${MASTER_VISUAL_STYLE.composition}`,
                     ``,
-
-                    // --- Professional photography ---
-                    `CAMERA: Full-frame 35mm, 35-85mm focal length. Shallow depth of field (f/1.8–f/2.8).`,
-                    `LIGHTING: Natural motivated light — window light, golden hour, or soft overcast. Strong contrast with dramatic shadows.`,
-                    `COLOR: Warm cinematic tones, Kodak Portra 400 feel. Slight film grain. Lifted blacks.`,
-                    `COMPOSITION: Rule of thirds. Emotional anchor at a power point. Environmental context in frame edges.`,
-                    `ASPECT RATIO: Exactly 1200×630 pixels (wide landscape, social media preview format).`,
-                    ``,
-
-                    // --- Moroccan identity (subtle, authentic) ---
-                    `PEOPLE: North African / Moroccan appearance — authentic features, skin tones, and hair. Modern clothing. No traditional garments, ornate architecture, flags, or calligraphy. The setting should feel contemporary and international.`,
-                    ``,
-
-                    // --- Hard constraints ---
-                    `ABSOLUTE RESTRICTIONS: ZERO text, words, watermarks, logos, UI overlays, captions, or borders anywhere in the image. Pure photograph only.`,
+                    // --- Hard Constraints ---
+                    MASTER_VISUAL_STYLE.restrictions,
                 ].join("\n");
 
                 const rawResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
