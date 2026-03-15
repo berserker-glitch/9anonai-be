@@ -81,10 +81,10 @@ function getExistingSlugs(outputDir: string): Set<string> {
 async function searchTrendingTopics(existingList: string, count: number = 8): Promise<string> {
     console.log(`   🔎 Querying Perplexity sonar-pro for trending Moroccan law searches...`);
 
-    const searchPrompt = `You are a legal content researcher. Search the web comprehensively to find:
+    const searchPrompt = `You are a legal content researcher specializing in the KINGDOM OF MOROCCO. Search the web comprehensively to find:
 
 1. What legal topics are Moroccans actively searching for right now?
-2. What new Moroccan laws, reforms, or legal changes have been announced or discussed recently?
+2. What new Moroccan laws, reforms, or legal changes (Dahir, Decrees, Circulars) have been announced or discussed recently?
 3. What legal problems or questions are most commonly asked in Morocco?
 
 IMPORTANT CONTEXT:
@@ -93,12 +93,19 @@ ${existingList ? existingList : "None yet."}
 
 DO NOT suggest or research these ALREADY PUBLISHED topics UNLESS there is a significant new development, law change, or new trend specifically related to them that hasn't been covered before.
 
-Search across:
-- Moroccan news sites (Hespress, Le360, Médio24, Yabiladi, 2M, TelQuel)
-- Legal forums and Q&A sites in Arabic and French
-- Moroccan government announcements (legislation, royal decrees)
-- Social media trending topics related to law in Morocco
-- Google Trends data for Morocco law-related searches
+STRICT SOURCE PRIORITY (Search these first):
+- الجريدة الرسمية (Official Gazette - sgg.gov.ma)
+- المجلس الأعلى للسلطة القضائية (CSPJ - cspj.ma)
+- محكمة النقض (Court of Cassation - cassation.cspj.ma)
+- وزارة العدل (Ministry of Justice - justice.gov.ma)
+- الأمانة العامة للحكومة (SGG - sgg.gov.ma)
+- هيئة المحامين بالمغرب (ABAM - abam.ma)
+- Moroccan news portals: Hespress, Le360, Médias24, Yabiladi, 2M, TelQuel
+
+GEOGRAPHIC RESTRAINTS:
+- ONLY return results related to the Kingdom of Morocco.
+- EXCLUDE legal news from other countries (e.g., if a topic mentions "Morocco" but refers to non-Moroccan law, ignore it).
+- EXCLUDE social media trends unless they directly relate to a specific Moroccan legal reform or procedural change.
 
 Focus on these legal domains:
 - Family law (Moudawana reforms, divorce, custody, inheritance)
@@ -113,7 +120,7 @@ Focus on these legal domains:
 Return a detailed report of at least ${count} distinct trending topics, including:
 - The topic name and why it's trending
 - What specific questions people are asking
-- Any recent legislative changes driving the interest
+- Any recent legislative changes driving the interest (cite specific Dahir/Law numbers if found)
 - Relevant search terms in Arabic and French
 
 Be specific and data-driven. Cite your sources.`;
@@ -362,28 +369,33 @@ ${doc.text}
 async function analyzeSERPCompetitors(topic: BlogTopic): Promise<string> {
     console.log(`   🔬 Analyzing SERP competitors for: "${topic.titles.en}"...`);
 
-    const serpPrompt = `Search Google for the following query and analyze the top results:
+    const serpPrompt = `Search Google and authoritative Moroccan portals for the following query and analyze the top results. 
 
-Query: "${topic.titles.en}" Morocco law
+Query: "${topic.titles.en}" Kingdom of Morocco law
+
+Additional specific searches:
+- site:sgg.gov.ma "${topic.titles.ar}" OR "${topic.titles.fr}"
+- site:cspj.ma "${topic.titles.ar}"
+- site:justice.gov.ma "${topic.titles.ar}"
 
 Also search in French: "${topic.titles.fr}"
 And in Arabic: "${topic.titles.ar}"
 
 For each of the top 5 ranking results, analyze:
-1. What specific legal articles/laws do they cite?
+1. What specific legal articles/laws do they cite? (Prioritize official Dahir or Law numbers)
 2. What sections/topics do they cover?
 3. What is their approximate word count?
 4. What do they MISS or cover poorly?
 
 Also extract:
-- All "People Also Ask" questions related to this topic
+- All "People Also Ask" questions related to this topic (localized to Morocco)
 - Related search suggestions at the bottom of the SERP
 - Any featured snippet content
 
 Return a structured brief with:
 COMPETITOR GAPS: What the top results miss or cover poorly
 PEOPLE ALSO ASK: List of PAA questions found
-MUST-COVER TOPICS: Sections we MUST include to outrank competitors
+MUST-COVER TOPICS: Sections we MUST include to outrank competitors (including specific legal citations)
 RECOMMENDED WORD COUNT: Based on competitor analysis`;
 
     try {
@@ -894,12 +906,12 @@ Return ONLY a 2-3 sentence visual scene description — vivid, physical, and det
  * Generates all 8 blog articles in 3 languages and saves them
  */
 async function main(): Promise<void> {
-    console.log("\n╔══════════════════════════════════════════════════════════════╗");
-    console.log("║     🇲🇦 MOROCCAN LAW MULTILINGUAL BLOG GENERATOR  (v2.0)     ║");
-    console.log("║     Step 1: Perplexity sonar-pro → trending topics           ║");
-    console.log("║     Step 2: SERP competitor analysis → content brief         ║");
-    console.log("║     Step 3: Gemini → 8 topics × 3 languages (2000+ words)   ║");
-    console.log("║     Step 4: Quality validation gate → retry if needed        ║");
+    const args = process.argv.slice(2);
+    const isSearchOnly = args.includes("--s") || args.includes("-s") || args.includes("--search");
+
+    if (isSearchOnly) {
+        console.log("║     🔍 SEARCH-ONLY MODE ACTIVATED                             ║");
+    }
     console.log("╚══════════════════════════════════════════════════════════════╝\n");
 
     // Verify API key is set
@@ -937,7 +949,16 @@ async function main(): Promise<void> {
     }
 
     console.log(`   ✅ Generated ${newTopics.length} new topics:\n`);
-    newTopics.forEach((t, i) => console.log(`      ${i + 1}. ${t.slug}`));
+    newTopics.forEach((t, i) => console.log(`      ${i + 1}. ${t.slug} (${t.titles.en})`));
+
+    if (isSearchOnly) {
+        console.log("\n╔══════════════════════════════════════════════════════════════╗");
+        console.log("║                    SEARCH MODE COMPLETE                       ║");
+        console.log("╚══════════════════════════════════════════════════════════════╝");
+        console.log(`\n✅ Found ${newTopics.length} trending topics.`);
+        console.log(`⏱️  Total time: ${((Date.now() - startTime) / 1000).toFixed(1)} seconds`);
+        return;
+    }
 
     // Generate articles for the new topics
     for (let topicIdx = 0; topicIdx < newTopics.length; topicIdx++) {
