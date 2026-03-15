@@ -20,7 +20,11 @@ import { getTable } from "../src/services/db";
 import { getEmbedding } from "../src/services/bi";
 import sharp from "sharp";
 
-
+/**
+ * GLOBAL CONFIGURATION
+ * Change this to control how many articles are researched and generated.
+ */
+const NUM_ARTICLES = 8;
 // Configure OpenAI client with OpenRouter
 const client = new OpenAI({
     baseURL: "https://openrouter.ai/api/v1",
@@ -87,11 +91,10 @@ async function searchTrendingTopics(existingList: string, count: number = 8): Pr
 2. What new Moroccan laws, reforms, or legal changes (Dahir, Decrees, Circulars) have been announced or discussed recently?
 3. What legal problems or questions are most commonly asked in Morocco?
 
-IMPORTANT CONTEXT:
-We have already published articles on the following topics/slugs:
-${existingList ? existingList : "None yet."}
-
-DO NOT suggest or research these ALREADY PUBLISHED topics UNLESS there is a significant new development, law change, or new trend specifically related to them that hasn't been covered before.
+DO NOT suggest or research these ALREADY PUBLISHED topics. You MUST find COMPLETELY NEW and UNIQUE legal developments or questions. 
+CRITICAL: If a topic is even remotely similar to an existing one, DISCARD IT. We are looking for "Gaps" in our current coverage of 143+ articles.
+Do not suggest "TikTok ban appeal" or generic non-legal trends. 
+Only suggest a topic related to an existing one IF there is a major new Law/Dahir/Decree published in the last 30 days that fundamentally changes the previous coverage.
 
 STRICT SOURCE PRIORITY (Search these first):
 - الجريدة الرسمية (Official Gazette - sgg.gov.ma)
@@ -189,7 +192,13 @@ ${trendReport ? `LIVE TREND RESEARCH FROM THE WEB:
 ${trendReport}
 ---
 
-Base your topics on the real search trends above.` : ""}
+Base your topics on the real search trends above. 
+
+CRITICAL ANTI-DUPLICATION RULE: 
+You are STRICTLY FORBIDDEN from generating topics that overlap with the existing list. 
+The user is concerned about receiving redundant topics. 
+Look for niche areas of Moroccan law: administrative litigation, tax disputes, specific commercial regulations, or very recent 2026 Dahirs.
+If the search result includes something like "TikTok ban", IGNORE IT as it is likely not a Moroccan legal reform.` : ""}
 
 RULES:
 - Each topic must address a real legal question Moroccans are searching for
@@ -940,8 +949,8 @@ async function main(): Promise<void> {
     const existingSlugs = getExistingSlugs(outputDir);
     console.log(`   ✅ Found ${existingSlugs.size} existing articles/topics`);
 
-    console.log(`   🧠 Generating 8 NEW unique topics...`);
-    const newTopics = await generateNewTopics(existingSlugs, 8);
+    console.log(`   🧠 Generating ${NUM_ARTICLES} NEW unique topics...`);
+    const newTopics = await generateNewTopics(existingSlugs, NUM_ARTICLES);
 
     if (newTopics.length === 0) {
         console.log("   ⚠️ No new topics generated. Exiting.");
