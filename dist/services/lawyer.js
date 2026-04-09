@@ -9,6 +9,7 @@ const config_1 = require("../config");
 const intent_classifier_1 = require("./intent-classifier");
 const query_router_1 = require("./query-router");
 const prisma_1 = require("./prisma");
+const logger_1 = require("./logger");
 const client = new openai_1.default({
     baseURL: config_1.config.openRouterBaseUrl,
     apiKey: config_1.config.openRouterApiKey,
@@ -136,7 +137,7 @@ async function perplexitySearch(query) {
         return response.choices[0]?.message?.content || "";
     }
     catch (error) {
-        console.error("Perplexity search failed:", error);
+        logger_1.logger.error("[LAWYER] Perplexity search failed:", { error });
         return "";
     }
 }
@@ -290,7 +291,7 @@ async function* getLegalAdviceStream(userQuery, history = [], images = [], userI
                 }
             }
             catch (e) {
-                console.warn("Failed to fetch personalization", e);
+                logger_1.logger.warn("[LAWYER] Failed to fetch personalization", { error: e });
             }
         }
         // Complexity Analysis & Instruction Injection
@@ -366,7 +367,7 @@ INSTRUCTIONS:
         else {
             // Document generation check is done later with history context
             const isDocRequestNow_check = isDocumentRequest(userQuery);
-            console.log("Initial doc request check:", isDocRequestNow_check, "User ID:", userId);
+            logger_1.logger.debug(`[LAWYER] Initial doc request check: ${isDocRequestNow_check}, User ID: ${userId}`);
             // Combined RAG + Perplexity Search
             yield { type: "step", content: "Scanning Moroccan Legal Database..." };
             const [routeResult, perplexityResults] = await Promise.all([
@@ -432,7 +433,7 @@ INSTRUCTIONS:
         yield { type: "done" };
     }
     catch (error) {
-        console.error("LLM Error:", error);
+        logger_1.logger.error("[LAWYER] LLM Error:", { error });
         yield { type: "step", content: "Error occurred during generation." };
         throw new Error("Failed to generate response.");
     }

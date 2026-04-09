@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateChatTitle = generateChatTitle;
 const openai_1 = __importDefault(require("openai"));
 const config_1 = require("../config");
+const logger_1 = require("./logger");
 const client = new openai_1.default({
     baseURL: config_1.config.openRouterBaseUrl,
     apiKey: config_1.config.openRouterApiKey,
@@ -44,7 +45,7 @@ Examples:
         return title.replace(/["""'']/g, "").slice(0, 50);
     }
     catch (error) {
-        console.error("Title generation error:", error);
+        logger_1.logger.error("[TITLE] Title generation error:", { error });
         return "New Chat";
     }
 }

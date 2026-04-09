@@ -4,9 +4,13 @@
  * Provides SSE streaming and non-streaming endpoints for chat interactions.
  * @module routes/chat
  */
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const zod_1 = require("zod");
+const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const lawyer_1 = require("../services/lawyer");
 const logger_1 = require("../services/logger");
 const auth_1 = require("../middleware/auth");
@@ -19,9 +23,12 @@ const router = (0, express_1.Router)();
  */
 const ChatSchema = zod_1.z.object({
     /** User's message/question */
-    message: zod_1.z.string().min(1, "Message cannot be empty"),
+    message: zod_1.z.string().min(1, "Message cannot be empty").max(10000, "Message too long"),
     /** Previous conversation history for context */
-    history: zod_1.z.array(zod_1.z.any()).optional(),
+    history: zod_1.z.array(zod_1.z.object({
+        role: zod_1.z.enum(["user", "assistant"]),
+        content: zod_1.z.string().max(10000),
+    })).max(50).optional(),
     /** Optional image attachments */
     images: zod_1.z.array(zod_1.z.object({
         data: zod_1.z.string(), // base64 encoded
@@ -29,6 +36,18 @@ const ChatSchema = zod_1.z.object({
     })).optional(),
     /** Chat ID for message persistence */
     chatId: zod_1.z.string().optional(),
+});
+/**
+ * Rate limiter for chat endpoints.
+ * Uses userId if authenticated, falls back to IP.
+ */
+const chatLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 60 * 1000, // 1 minute
+    max: 20, // 20 messages per minute
+    message: { error: 'Too many requests, please slow down' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.userId || req.ip || 'unknown',
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // Routes
@@ -47,7 +66,7 @@ const prisma_1 = require("../services/prisma");
  * @param {string} [req.body.chatId] - Chat ID to save the response to
  * @returns {stream} SSE stream with AI response tokens and metadata
  */
-router.post("/", auth_1.optionalAuth, async (req, res) => {
+router.post("/", auth_1.optionalAuth, chatLimiter, async (req, res) => {
     // Set up SSE headers for streaming response
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -55,7 +74,7 @@ router.post("/", auth_1.optionalAuth, async (req, res) => {
     try {
         const { message, history, images, chatId } = ChatSchema.parse(req.body);
         const userId = req.userId;
-        console.log(`[CHAT] Incoming | UserId: ${userId || 'guest'} | ChatId: ${chatId || 'none'} | Msg: ${message.substring(0, 30)}...`);
+        logger_1.logger.info(`[CHAT] Incoming | UserId: ${userId || 'guest'} | ChatId: ${chatId || 'none'} | Msg: ${message.substring(0, 30)}...`);
         // Log chat event
         (0, logger_1.logChatEvent)("stream_start", userId || null, {
             messageLength: message.length,
@@ -132,16 +151,14 @@ router.post("/", auth_1.optionalAuth, async (req, res) => {
                             data: { updatedAt: new Date() }
                         });
                         logger_1.logger.info(`[CHAT] Saved assistant response to chat ${chatId}`);
-                        console.log(`✅ [PERSISTENCE] Saved to chat ${chatId}`);
+                        logger_1.logger.debug(`[PERSISTENCE] Saved to chat ${chatId}`);
                     }
                     else {
                         logger_1.logger.warn(`[CHAT] Skipped saving: Chat ${chatId} not found or mismatch for user ${userId}`);
-                        console.log(`⚠️ [PERSISTENCE] Chat ${chatId} not found or ownership mismatch for user ${userId}`);
                     }
                 }
                 else {
                     logger_1.logger.warn(`[CHAT] Skipped saving: User not authenticated for chat ${chatId}`);
-                    console.log(`⚠️ [PERSISTENCE] User not authenticated for chat ${chatId}`);
                 }
             }
             catch (dbError) {
@@ -198,7 +215,7 @@ router.post("/", auth_1.optionalAuth, async (req, res) => {
  * @param {Array} [req.body.images] - Image attachments (base64)
  * @returns {object} 200 - Complete response with content and sources
  */
-router.post("/non-stream", auth_1.optionalAuth, async (req, res) => {
+router.post("/non-stream", auth_1.optionalAuth, chatLimiter, async (req, res) => {
     try {
         const { message, history, images } = ChatSchema.parse(req.body);
         const userId = req.userId;

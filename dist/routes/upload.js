@@ -22,6 +22,8 @@ const router = (0, express_1.Router)();
 // ─────────────────────────────────────────────────────────────────────────────
 /** Base directory for user uploads */
 const uploadsDir = path_1.default.join(__dirname, "../../uploads/user-uploaded-files");
+/** Resolved base directory for path traversal validation */
+const uploadsBaseDir = path_1.default.resolve(__dirname, "../../uploads");
 /** Directory for generated PDFs */
 const pdfsDir = path_1.default.join(__dirname, "../../uploads/pdfs-generated");
 // Ensure directories exist
@@ -45,6 +47,7 @@ const ALLOWED_MIME_TYPES = [
     "application/pdf",
     "text/plain",
     "text/markdown",
+    "text/csv",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ];
@@ -229,8 +232,12 @@ router.delete("/:id", auth_1.authenticate, (0, error_handler_1.asyncHandler)(asy
     if (!file) {
         throw error_handler_1.HttpErrors.notFound("File");
     }
-    // Delete from filesystem
-    const filepath = path_1.default.join(__dirname, "../../", file.path);
+    // Delete from filesystem (with path traversal protection)
+    const filepath = path_1.default.resolve(path_1.default.join(__dirname, "../../", file.path));
+    if (!filepath.startsWith(uploadsBaseDir)) {
+        logger_1.logger.error(`[UPLOAD] Path traversal attempt blocked on delete: ${file.path}`);
+        throw error_handler_1.HttpErrors.badRequest("Invalid file path");
+    }
     if (fs_1.default.existsSync(filepath)) {
         fs_1.default.unlinkSync(filepath);
         logger_1.logger.debug(`[UPLOAD] Deleted file from disk: ${filepath}`);
@@ -239,5 +246,35 @@ router.delete("/:id", auth_1.authenticate, (0, error_handler_1.asyncHandler)(asy
     await prisma_1.prisma.userFile.delete({ where: { id } });
     (0, logger_1.logDbOperation)("delete", "UserFile", true, `File ${id} deleted by ${userId}`);
     res.json({ success: true });
+}));
+/**
+ * GET /api/upload/files/:id/download
+ * Downloads a specific uploaded file.
+ *
+ * @route GET /api/upload/files/:id/download
+ * @security Bearer
+ * @param {string} req.params.id - File ID
+ * @returns {stream} The file content
+ */
+router.get("/files/:id/download", auth_1.authenticate, (0, error_handler_1.asyncHandler)(async (req, res) => {
+    const userId = req.userId;
+    const { id } = req.params;
+    const file = await prisma_1.prisma.userFile.findUnique({ where: { id, userId } });
+    if (!file) {
+        throw error_handler_1.HttpErrors.notFound("File");
+    }
+    const filepath = path_1.default.resolve(path_1.default.join(__dirname, "../../", file.path));
+    if (!filepath.startsWith(uploadsBaseDir)) {
+        logger_1.logger.error(`[UPLOAD] Path traversal attempt blocked on download: ${file.path}`);
+        throw error_handler_1.HttpErrors.badRequest("Invalid file path");
+    }
+    if (!fs_1.default.existsSync(filepath)) {
+        logger_1.logger.error(`[UPLOAD] File missing from disk: ${filepath}`);
+        throw error_handler_1.HttpErrors.notFound("File not found on disk");
+    }
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(file.originalName)}"`);
+    res.setHeader("Content-Type", file.mimetype);
+    const fileStream = fs_1.default.createReadStream(filepath);
+    fileStream.pipe(res);
 }));
 exports.default = router;

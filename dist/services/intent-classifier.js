@@ -7,6 +7,7 @@ exports.classifyIntent = classifyIntent;
 exports.isObviouslyCasual = isObviouslyCasual;
 const openai_1 = __importDefault(require("openai"));
 const config_1 = require("../config");
+const logger_1 = require("./logger");
 const client = new openai_1.default({
     baseURL: config_1.config.openRouterBaseUrl,
     apiKey: config_1.config.openRouterApiKey,
@@ -70,7 +71,7 @@ RESPOND WITH JSON ONLY. NO EXPLANATION.`
         return { type: "legal", domain: "other", complexity: "simple" };
     }
     catch (error) {
-        console.error("Intent classification error:", error);
+        logger_1.logger.error("[INTENT] Intent classification error:", { error });
         // Fallback: assume legal to be safe
         return { type: "legal", domain: "other", complexity: "simple" };
     }
