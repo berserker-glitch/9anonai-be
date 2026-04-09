@@ -357,10 +357,18 @@ router.get("/sessions/:id/html", authenticate, async (req: Request, res: Respons
             return res.status(404).json({ error: "Session not found" });
         }
 
+        let parsedReviewNotes = null;
+        try {
+            parsedReviewNotes = session.reviewNotes ? JSON.parse(session.reviewNotes) : null;
+        } catch (e) {
+            logger.warn(`[CONTRACT-ROUTES] Invalid JSON in reviewNotes for session ${id}`);
+            parsedReviewNotes = null;
+        }
+
         return res.json({
             html: session.htmlContent,
             version: session.version,
-            reviewNotes: session.reviewNotes ? JSON.parse(session.reviewNotes) : null,
+            reviewNotes: parsedReviewNotes,
         });
     } catch (error) {
         logger.error("[CONTRACT-ROUTES] Failed to get HTML:", error);

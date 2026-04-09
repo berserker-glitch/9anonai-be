@@ -46,7 +46,7 @@ export const getEmbeddingsBatch = async (texts: string[]): Promise<number[][]> =
         // Sort by index to maintain order if necessary, though API usually preserves it.
         return response.data.map(d => d.embedding);
     } catch (error) {
-        console.error("Error generating batched embeddings:", error);
+        logger.error("[EMBEDDING] Error generating batched embeddings:", { error });
         throw error;
     }
 }

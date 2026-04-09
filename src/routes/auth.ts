@@ -7,6 +7,7 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
+import rateLimit from "express-rate-limit";
 import { prisma } from "../services/prisma";
 import { logger, logAuthEvent } from "../services/logger";
 import {
@@ -27,7 +28,11 @@ const router = Router();
  */
 const RegisterSchema = z.object({
     email: z.string().email("Invalid email format"),
-    password: z.string().min(6, "Password must be at least 6 characters"),
+    password: z.string()
+        .min(8, "Password must be at least 8 characters")
+        .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+        .regex(/[a-z]/, "Password must contain at least one lowercase letter")
+        .regex(/[0-9]/, "Password must contain at least one number"),
     name: z.string().optional(),
 });
 
@@ -54,7 +59,11 @@ const UpdateProfileSchema = z.object({
  */
 const ChangePasswordSchema = z.object({
     currentPassword: z.string().min(1, "Current password is required"),
-    newPassword: z.string().min(6, "New password must be at least 6 characters"),
+    newPassword: z.string()
+        .min(8, "New password must be at least 8 characters")
+        .regex(/[A-Z]/, "New password must contain at least one uppercase letter")
+        .regex(/[a-z]/, "New password must contain at least one lowercase letter")
+        .regex(/[0-9]/, "New password must contain at least one number"),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -63,6 +72,19 @@ const ChangePasswordSchema = z.object({
 
 /** Number of salt rounds for bcrypt password hashing */
 const BCRYPT_SALT_ROUNDS = 10;
+
+/**
+ * Rate limiter for authentication endpoints.
+ * Prevents brute-force attacks on login/register/change-password.
+ */
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10,                  // 10 attempts per window
+    message: { error: 'Too many attempts, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.ip || 'unknown',
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Routes
@@ -79,7 +101,7 @@ const BCRYPT_SALT_ROUNDS = 10;
  * @returns {object} 201 - JWT token and user data
  * @returns {object} 400 - Validation error or user already exists
  */
-router.post("/register", asyncHandler(async (req: Request, res: Response) => {
+router.post("/register", authLimiter, asyncHandler(async (req: Request, res: Response) => {
     const { email, password, name } = RegisterSchema.parse(req.body);
 
     // Check if user already exists
@@ -126,7 +148,7 @@ router.post("/register", asyncHandler(async (req: Request, res: Response) => {
  * @returns {object} 200 - JWT token and user data
  * @returns {object} 401 - Invalid credentials
  */
-router.post("/login", asyncHandler(async (req: Request, res: Response) => {
+router.post("/login", authLimiter, asyncHandler(async (req: Request, res: Response) => {
     const { email, password } = LoginSchema.parse(req.body);
 
     // Find user by email
@@ -282,7 +304,7 @@ router.post("/update-profile", authenticate, asyncHandler(async (req: Request, r
  * @returns {object} 200 - Success message
  * @returns {object} 401 - Incorrect current password
  */
-router.post("/change-password", authenticate, asyncHandler(async (req: Request, res: Response) => {
+router.post("/change-password", authenticate, authLimiter, asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId!;
     const { currentPassword, newPassword } = ChangePasswordSchema.parse(req.body);
 

@@ -2,8 +2,21 @@ import puppeteer from "puppeteer";
 import fs from "fs";
 import path from "path";
 import { prisma } from "./prisma";
+import { logger } from "./logger";
 
 const GENERATED_PDFS_DIR = path.join(__dirname, "../../uploads/pdfs-generated");
+
+/**
+ * Escapes HTML entities to prevent XSS when embedding user content in templates.
+ */
+function escapeHtml(str: string): string {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
 
 export interface ContractData {
     type: string;
@@ -107,6 +120,8 @@ function generateHtmlTemplate(title: string, content: string, language: string, 
     const textAlign = isRTL ? 'right' : 'left';
     const fontFamily = isRTL ? "'Amiri', 'Traditional Arabic', 'Arial', serif" : "'Times New Roman', serif";
 
+    // Sanitize user-provided content before converting to HTML
+    const safeTitle = escapeHtml(title);
     const contentHtml = contentToHtml(content);
 
     return `
@@ -116,7 +131,7 @@ function generateHtmlTemplate(title: string, content: string, language: string, 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&display=swap" rel="stylesheet">
-    <title>${title}</title>
+    <title>${safeTitle}</title>
     <style>
         @page {
             size: A4;
@@ -230,7 +245,7 @@ function generateHtmlTemplate(title: string, content: string, language: string, 
         <div>Document ID: ${timestamp}</div>
     </div>
     
-    <div class="title">${title}</div>
+    <div class="title">${safeTitle}</div>
     
     <div class="content">
         ${contentHtml}
@@ -268,7 +283,7 @@ export async function generateFlexiblePDF(
     const filename = `${type}_${timestamp}.pdf`;
     const filepath = path.join(userDir, filename);
 
-    console.log(`Generating PDF with Puppeteer: language=${language}, type=${type}`);
+    logger.info(`[PDF] Generating PDF with Puppeteer: language=${language}, type=${type}`);
 
     // Generate HTML
     const html = generateHtmlTemplate(title, content, language, timestamp);
@@ -276,11 +291,13 @@ export async function generateFlexiblePDF(
     // Launch Puppeteer and generate PDF
     const browser = await puppeteer.launch({
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     });
 
     try {
         const page = await browser.newPage();
+        // Disable JavaScript execution in page context to prevent XSS during PDF render
+        await page.setJavaScriptEnabled(false);
         await page.setContent(html, { waitUntil: 'networkidle0' });
 
         // Generate A4 PDF
@@ -296,7 +313,7 @@ export async function generateFlexiblePDF(
             }
         });
 
-        console.log(`PDF generated successfully: ${filepath}`);
+        logger.info(`[PDF] PDF generated successfully: ${filepath}`);
 
         // Save to Database
         const doc = await prisma.generatedDocument.create({

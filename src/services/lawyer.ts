@@ -4,6 +4,7 @@ import { classifyIntent, isObviouslyCasual, Intent } from "./intent-classifier";
 import { routeQuery, buildContext } from "./query-router";
 import { generateContract, ContractData } from "./contract-generator";
 import { prisma } from "./prisma";
+import { logger } from "./logger";
 
 const client = new OpenAI({
     baseURL: config.openRouterBaseUrl,
@@ -151,7 +152,7 @@ async function perplexitySearch(query: string): Promise<string> {
         });
         return response.choices[0]?.message?.content || "";
     } catch (error) {
-        console.error("Perplexity search failed:", error);
+        logger.error("[LAWYER] Perplexity search failed:", { error });
         return "";
     }
 }
@@ -324,7 +325,7 @@ export async function* getLegalAdviceStream(
                     }
                 }
             } catch (e) {
-                console.warn("Failed to fetch personalization", e);
+                logger.warn("[LAWYER] Failed to fetch personalization", { error: e });
             }
         }
 
@@ -404,7 +405,7 @@ INSTRUCTIONS:
         } else {
             // Document generation check is done later with history context
             const isDocRequestNow_check = isDocumentRequest(userQuery);
-            console.log("Initial doc request check:", isDocRequestNow_check, "User ID:", userId);
+            logger.debug(`[LAWYER] Initial doc request check: ${isDocRequestNow_check}, User ID: ${userId}`);
 
             // Combined RAG + Perplexity Search
             yield { type: "step", content: "Scanning Moroccan Legal Database..." };
@@ -481,7 +482,7 @@ INSTRUCTIONS:
         yield { type: "done" };
 
     } catch (error) {
-        console.error("LLM Error:", error);
+        logger.error("[LAWYER] LLM Error:", { error });
         yield { type: "step", content: "Error occurred during generation." };
         throw new Error("Failed to generate response.");
     }
