@@ -48,7 +48,7 @@ const getEmbeddingsBatch = async (texts) => {
         return response.data.map(d => d.embedding);
     }
     catch (error) {
-        console.error("Error generating batched embeddings:", error);
+        logger_1.logger.error("[EMBEDDING] Error generating batched embeddings:", { error });
         throw error;
     }
 };

@@ -33,6 +33,7 @@ const AddMessageSchema = zod_1.z.object({
     parentId: zod_1.z.string().optional(),
     attachmentUrl: zod_1.z.string().optional(),
     attachmentName: zod_1.z.string().optional(),
+    files: zod_1.z.string().optional(),
 });
 /**
  * Schema for updating message feedback.
@@ -229,7 +230,7 @@ router.patch("/:id/pin", auth_1.authenticate, (0, error_handler_1.asyncHandler)(
 router.patch("/:id/title", auth_1.authenticate, (0, error_handler_1.asyncHandler)(async (req, res) => {
     const userId = req.userId;
     const { id } = req.params;
-    const { title } = req.body;
+    const { title } = zod_1.z.object({ title: zod_1.z.string().min(1).max(100) }).parse(req.body);
     const chat = await prisma_1.prisma.chat.findUnique({ where: { id, userId } });
     if (!chat) {
         throw error_handler_1.HttpErrors.notFound("Chat");
@@ -290,6 +291,7 @@ router.post("/:id/messages", auth_1.authenticate, (0, error_handler_1.asyncHandl
             sources: sources,
             attachmentUrl: messageData.attachmentUrl || null,
             attachmentName: messageData.attachmentName || null,
+            files: messageData.files || null,
             parentId: messageData.parentId || undefined,
             version,
             isActive: true,

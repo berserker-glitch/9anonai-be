@@ -1,39 +1,17 @@
 import { Router, Request, Response } from "express";
-import jwt from "jsonwebtoken";
 import path from "path";
 import fs from "fs";
 import { prisma } from "../services/prisma";
 import { generateContract, ContractData, getContractTypes } from "../services/contract-generator";
+import { authenticate, AuthenticatedRequest } from "../middleware/auth";
+import { logger } from "../services/logger";
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET) {
-    throw new Error("JWT_SECRET environment variable is required");
-}
 
-// Auth middleware
-const authenticate = (req: Request, res: Response, next: Function) => {
-    let token: string | undefined;
-    const authHeader = req.headers.authorization;
+/** Base directory for generated PDFs, used for path traversal validation */
+const GENERATED_PDFS_DIR = path.resolve(__dirname, "../../uploads/pdfs-generated");
 
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-        token = authHeader.split(" ")[1];
-    } else if (req.query.token) {
-        token = req.query.token as string;
-    }
 
-    if (!token) {
-        return res.status(401).json({ error: "No token provided" });
-    }
-
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
-        (req as any).userId = decoded.userId;
-        next();
-    } catch (error) {
-        res.status(401).json({ error: "Invalid token" });
-    }
-};
 
 // GET /api/pdf/types - Get available contract types
 router.get("/types", (req: Request, res: Response) => {
@@ -48,7 +26,7 @@ router.post("/generate", authenticate, async (req: Request, res: Response) => {
 // GET /api/pdf/list - List user's generated PDFs
 router.get("/list", authenticate, async (req: Request, res: Response) => {
     try {
-        const userId = (req as any).userId;
+        const userId = (req as AuthenticatedRequest).userId!;
 
         const documents = await prisma.generatedDocument.findMany({
             where: { userId },
@@ -65,7 +43,7 @@ router.get("/list", authenticate, async (req: Request, res: Response) => {
 
         res.json(documents);
     } catch (error) {
-        console.error("Error listing PDFs:", error);
+        logger.error("[PDF] Error listing PDFs:", { error });
         res.status(500).json({ error: "Failed to list documents" });
     }
 });
@@ -73,7 +51,7 @@ router.get("/list", authenticate, async (req: Request, res: Response) => {
 // GET /api/pdf/:id - Get specific document info
 router.get("/:id", authenticate, async (req: Request, res: Response) => {
     try {
-        const userId = (req as any).userId;
+        const userId = (req as AuthenticatedRequest).userId!;
         const { id } = req.params;
 
         const document = await prisma.generatedDocument.findUnique({
@@ -84,12 +62,21 @@ router.get("/:id", authenticate, async (req: Request, res: Response) => {
             return res.status(404).json({ error: "Document not found" });
         }
 
+        // Safe JSON parse for metadata
+        let parsedMetadata = null;
+        try {
+            parsedMetadata = document.metadata ? JSON.parse(document.metadata) : null;
+        } catch (e) {
+            logger.warn(`[PDF] Invalid JSON in metadata for document ${id}`);
+            parsedMetadata = null;
+        }
+
         res.json({
             ...document,
-            metadata: document.metadata ? JSON.parse(document.metadata) : null
+            metadata: parsedMetadata
         });
     } catch (error) {
-        console.error("Error getting document:", error);
+        logger.error("[PDF] Error getting document:", { error });
         res.status(500).json({ error: "Failed to get document" });
     }
 });
@@ -102,7 +89,7 @@ router.get("/download/:id", authenticate, async (req: Request, res: Response) =>
 // DELETE /api/pdf/:id - Delete a generated document
 router.delete("/:id", authenticate, async (req: Request, res: Response) => {
     try {
-        const userId = (req as any).userId;
+        const userId = (req as AuthenticatedRequest).userId!;
         const { id } = req.params;
 
         const document = await prisma.generatedDocument.findUnique({
@@ -113,8 +100,13 @@ router.delete("/:id", authenticate, async (req: Request, res: Response) => {
             return res.status(404).json({ error: "Document not found" });
         }
 
-        // Delete from filesystem - path in DB is absolute
-        const filepath = document.path;
+        // Validate path to prevent path traversal
+        const filepath = path.resolve(document.path);
+        if (!filepath.startsWith(GENERATED_PDFS_DIR)) {
+            logger.error(`[PDF] Path traversal attempt blocked: ${document.path}`);
+            return res.status(400).json({ error: "Invalid file path" });
+        }
+
         if (fs.existsSync(filepath)) {
             fs.unlinkSync(filepath);
         }
@@ -124,7 +116,7 @@ router.delete("/:id", authenticate, async (req: Request, res: Response) => {
 
         res.json({ success: true });
     } catch (error) {
-        console.error("Error deleting document:", error);
+        logger.error("[PDF] Error deleting document:", { error });
         res.status(500).json({ error: "Failed to delete document" });
     }
 });

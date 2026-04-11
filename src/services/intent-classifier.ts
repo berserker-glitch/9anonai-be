@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { config } from "../config";
+import { logger } from "./logger";
 
 const client = new OpenAI({
     baseURL: config.openRouterBaseUrl,
@@ -72,7 +73,7 @@ RESPOND WITH JSON ONLY. NO EXPLANATION.`
         return { type: "legal", domain: "other", complexity: "simple" };
 
     } catch (error) {
-        console.error("Intent classification error:", error);
+        logger.error("[INTENT] Intent classification error:", { error });
         // Fallback: assume legal to be safe
         return { type: "legal", domain: "other", complexity: "simple" };
     }

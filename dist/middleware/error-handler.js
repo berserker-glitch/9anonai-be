@@ -96,11 +96,20 @@ const formatPrismaError = (error) => {
  * app.use(errorHandler);
  */
 const errorHandler = (err, req, res, next) => {
+    // Redact sensitive fields before logging to prevent PII leakage
+    const sanitizedBody = req.body ? { ...req.body } : undefined;
+    if (sanitizedBody) {
+        const sensitiveFields = ['password', 'currentPassword', 'newPassword', 'token'];
+        for (const field of sensitiveFields) {
+            if (sanitizedBody[field])
+                sanitizedBody[field] = '[REDACTED]';
+        }
+    }
     // Log the error
     logger_1.logger.error(`[ERROR] ${req.method} ${req.path}`, {
         error: err.message,
         stack: err.stack,
-        body: req.body,
+        body: sanitizedBody,
         params: req.params,
         query: req.query,
     });

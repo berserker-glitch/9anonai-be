@@ -262,7 +262,7 @@ router.patch("/:id/pin", authenticate, asyncHandler(async (req: Request, res: Re
 router.patch("/:id/title", authenticate, asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId!;
     const { id } = req.params;
-    const { title } = req.body;
+    const { title } = z.object({ title: z.string().min(1).max(100) }).parse(req.body);
 
     const chat = await prisma.chat.findUnique({ where: { id, userId } });
     if (!chat) {

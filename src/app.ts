@@ -6,6 +6,7 @@
 
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
 import path from "path";
 
 // Routes
@@ -44,10 +45,27 @@ app.use(cors({
 }));
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Security Headers (Helmet)
+// ─────────────────────────────────────────────────────────────────────────────
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            fontSrc: ["'self'", "https://fonts.gstatic.com"],
+            imgSrc: ["'self'", "data:", "blob:"],
+            connectSrc: ["'self'", ...corsOrigins],
+        },
+    },
+    crossOriginEmbedderPolicy: false, // Allow embedding fonts/images from CDN
+}));
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Body Parsing Middleware
 // ─────────────────────────────────────────────────────────────────────────────
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
+app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ limit: "2mb", extended: true }));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Request Logging Middleware (Winston-based)
@@ -78,9 +96,6 @@ app.get("/health", (req, res) => {
     res.json({
         status: "ok",
         timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-        version: process.env.npm_package_version || "1.0.0",
     });
 });
 

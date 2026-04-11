@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { config } from "../config";
+import { logger } from "./logger";
 
 const client = new OpenAI({
     baseURL: config.openRouterBaseUrl,
@@ -40,7 +41,7 @@ Examples:
         // Remove any quotes
         return title.replace(/["""'']/g, "").slice(0, 50);
     } catch (error) {
-        console.error("Title generation error:", error);
+        logger.error("[TITLE] Title generation error:", { error });
         return "New Chat";
     }
 }

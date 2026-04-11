@@ -22,6 +22,9 @@ const router = Router();
 /** Base directory for user uploads */
 const uploadsDir = path.join(__dirname, "../../uploads/user-uploaded-files");
 
+/** Resolved base directory for path traversal validation */
+const uploadsBaseDir = path.resolve(__dirname, "../../uploads");
+
 /** Directory for generated PDFs */
 const pdfsDir = path.join(__dirname, "../../uploads/pdfs-generated");
 
@@ -263,8 +266,12 @@ router.delete("/:id", authenticate, asyncHandler(async (req: Request, res: Respo
         throw HttpErrors.notFound("File");
     }
 
-    // Delete from filesystem
-    const filepath = path.join(__dirname, "../../", file.path);
+    // Delete from filesystem (with path traversal protection)
+    const filepath = path.resolve(path.join(__dirname, "../../", file.path));
+    if (!filepath.startsWith(uploadsBaseDir)) {
+        logger.error(`[UPLOAD] Path traversal attempt blocked on delete: ${file.path}`);
+        throw HttpErrors.badRequest("Invalid file path");
+    }
     if (fs.existsSync(filepath)) {
         fs.unlinkSync(filepath);
         logger.debug(`[UPLOAD] Deleted file from disk: ${filepath}`);
@@ -296,7 +303,11 @@ router.get("/files/:id/download", authenticate, asyncHandler(async (req: Request
         throw HttpErrors.notFound("File");
     }
 
-    const filepath = path.join(__dirname, "../../", file.path);
+    const filepath = path.resolve(path.join(__dirname, "../../", file.path));
+    if (!filepath.startsWith(uploadsBaseDir)) {
+        logger.error(`[UPLOAD] Path traversal attempt blocked on download: ${file.path}`);
+        throw HttpErrors.badRequest("Invalid file path");
+    }
     if (!fs.existsSync(filepath)) {
         logger.error(`[UPLOAD] File missing from disk: ${filepath}`);
         throw HttpErrors.notFound("File not found on disk");

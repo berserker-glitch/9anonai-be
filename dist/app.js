@@ -10,6 +10,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
+const helmet_1 = __importDefault(require("helmet"));
 const path_1 = __importDefault(require("path"));
 // Routes
 const chat_1 = __importDefault(require("./routes/chat"));
@@ -38,10 +39,26 @@ app.use((0, cors_1.default)({
     allowedHeaders: ["Content-Type", "Authorization"],
 }));
 // ─────────────────────────────────────────────────────────────────────────────
+// Security Headers (Helmet)
+// ─────────────────────────────────────────────────────────────────────────────
+app.use((0, helmet_1.default)({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            fontSrc: ["'self'", "https://fonts.gstatic.com"],
+            imgSrc: ["'self'", "data:", "blob:"],
+            connectSrc: ["'self'", ...corsOrigins],
+        },
+    },
+    crossOriginEmbedderPolicy: false, // Allow embedding fonts/images from CDN
+}));
+// ─────────────────────────────────────────────────────────────────────────────
 // Body Parsing Middleware
 // ─────────────────────────────────────────────────────────────────────────────
-app.use(express_1.default.json({ limit: "50mb" }));
-app.use(express_1.default.urlencoded({ limit: "50mb", extended: true }));
+app.use(express_1.default.json({ limit: "2mb" }));
+app.use(express_1.default.urlencoded({ limit: "2mb", extended: true }));
 // ─────────────────────────────────────────────────────────────────────────────
 // Request Logging Middleware (Winston-based)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,9 +84,6 @@ app.get("/health", (req, res) => {
     res.json({
         status: "ok",
         timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-        version: process.env.npm_package_version || "1.0.0",
     });
 });
 // ─────────────────────────────────────────────────────────────────────────────

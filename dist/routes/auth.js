@@ -11,6 +11,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const zod_1 = require("zod");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const prisma_1 = require("../services/prisma");
 const logger_1 = require("../services/logger");
 const auth_1 = require("../middleware/auth");
@@ -24,7 +25,11 @@ const router = (0, express_1.Router)();
  */
 const RegisterSchema = zod_1.z.object({
     email: zod_1.z.string().email("Invalid email format"),
-    password: zod_1.z.string().min(6, "Password must be at least 6 characters"),
+    password: zod_1.z.string()
+        .min(8, "Password must be at least 8 characters")
+        .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+        .regex(/[a-z]/, "Password must contain at least one lowercase letter")
+        .regex(/[0-9]/, "Password must contain at least one number"),
     name: zod_1.z.string().optional(),
 });
 /**
@@ -48,13 +53,29 @@ const UpdateProfileSchema = zod_1.z.object({
  */
 const ChangePasswordSchema = zod_1.z.object({
     currentPassword: zod_1.z.string().min(1, "Current password is required"),
-    newPassword: zod_1.z.string().min(6, "New password must be at least 6 characters"),
+    newPassword: zod_1.z.string()
+        .min(8, "New password must be at least 8 characters")
+        .regex(/[A-Z]/, "New password must contain at least one uppercase letter")
+        .regex(/[a-z]/, "New password must contain at least one lowercase letter")
+        .regex(/[0-9]/, "New password must contain at least one number"),
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 /** Number of salt rounds for bcrypt password hashing */
 const BCRYPT_SALT_ROUNDS = 10;
+/**
+ * Rate limiter for authentication endpoints.
+ * Prevents brute-force attacks on login/register/change-password.
+ */
+const authLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10, // 10 attempts per window
+    message: { error: 'Too many attempts, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.ip || 'unknown',
+});
 // ─────────────────────────────────────────────────────────────────────────────
 // Routes
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,7 +90,7 @@ const BCRYPT_SALT_ROUNDS = 10;
  * @returns {object} 201 - JWT token and user data
  * @returns {object} 400 - Validation error or user already exists
  */
-router.post("/register", (0, error_handler_1.asyncHandler)(async (req, res) => {
+router.post("/register", authLimiter, (0, error_handler_1.asyncHandler)(async (req, res) => {
     const { email, password, name } = RegisterSchema.parse(req.body);
     // Check if user already exists
     const existingUser = await prisma_1.prisma.user.findUnique({ where: { email } });
@@ -109,7 +130,7 @@ router.post("/register", (0, error_handler_1.asyncHandler)(async (req, res) => {
  * @returns {object} 200 - JWT token and user data
  * @returns {object} 401 - Invalid credentials
  */
-router.post("/login", (0, error_handler_1.asyncHandler)(async (req, res) => {
+router.post("/login", authLimiter, (0, error_handler_1.asyncHandler)(async (req, res) => {
     const { email, password } = LoginSchema.parse(req.body);
     // Find user by email
     const user = await prisma_1.prisma.user.findUnique({ where: { email } });
@@ -245,7 +266,7 @@ router.post("/update-profile", auth_1.authenticate, (0, error_handler_1.asyncHan
  * @returns {object} 200 - Success message
  * @returns {object} 401 - Incorrect current password
  */
-router.post("/change-password", auth_1.authenticate, (0, error_handler_1.asyncHandler)(async (req, res) => {
+router.post("/change-password", auth_1.authenticate, authLimiter, (0, error_handler_1.asyncHandler)(async (req, res) => {
     const userId = req.userId;
     const { currentPassword, newPassword } = ChangePasswordSchema.parse(req.body);
     // Fetch user with password
