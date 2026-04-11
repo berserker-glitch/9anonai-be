@@ -14,6 +14,7 @@ import authRouter from "./routes/auth";
 import chatsRouter from "./routes/chats";
 import uploadRouter from "./routes/upload";
 import adminRouter from "./routes/admin";
+import adminAnalyticsRouter from "./routes/admin-analytics";
 import pdfRouter from "./routes/pdf";
 import contractBuilderRouter from "./routes/contract-builder";
 
@@ -66,6 +67,7 @@ app.use("/api/auth", authRouter);      // Auth (register, login)
 app.use("/api/chats", chatsRouter);    // Chat persistence (CRUD)
 app.use("/api/upload", uploadRouter);  // File uploads
 app.use("/api/admin", adminRouter);    // Admin dashboard
+app.use("/api/admin/analytics", adminAnalyticsRouter); // Admin analytics
 app.use("/api/pdf", pdfRouter);        // PDF contract generation
 app.use("/api/contract-builder", contractBuilderRouter); // Contract Builder
 
