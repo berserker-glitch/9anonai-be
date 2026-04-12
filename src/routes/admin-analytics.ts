@@ -293,22 +293,25 @@ router.get("/engagement/activity-heatmap", authenticate, requireSuperAdmin, asyn
     const range = (req.query.range as string) || "30d";
     const { startDate } = parseDateRange(range);
 
-    const rows: Array<{ dayOfWeek: number; hour: number; count: bigint }> = await prisma.$queryRaw`
+    // Use explicit expressions in GROUP BY (avoid aliases + reserved words in ORDER BY).
+    // Sort result in JS after fetching.
+    const rows: Array<{ dow: number; hr: number; cnt: bigint }> = await prisma.$queryRaw`
         SELECT
-            DAYOFWEEK(createdAt) - 1 AS dayOfWeek,
-            HOUR(createdAt) AS hour,
-            COUNT(*) AS count
+            (DAYOFWEEK(createdAt) - 1)  AS dow,
+            HOUR(createdAt)             AS hr,
+            COUNT(*)                    AS cnt
         FROM Message
         WHERE role = 'user' AND createdAt >= ${startDate}
-        GROUP BY DAYOFWEEK(createdAt), HOUR(createdAt)
-        ORDER BY dayOfWeek ASC, hour ASC
+        GROUP BY (DAYOFWEEK(createdAt) - 1), HOUR(createdAt)
     `;
 
-    const data = rows.map((r) => ({
-        dayOfWeek: Number(r.dayOfWeek),
-        hour: Number(r.hour),
-        count: Number(r.count),
-    }));
+    const data = rows
+        .map((r) => ({
+            dayOfWeek: Number(r.dow),
+            hour:      Number(r.hr),
+            count:     Number(r.cnt),
+        }))
+        .sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.hour - b.hour);
 
     res.json({ data });
 }));
@@ -431,11 +434,11 @@ router.get("/content/overview", authenticate, requireSuperAdmin, asyncHandler(as
 
     let contractTimeseries: Array<{ date: string; count: bigint }>;
     if (granularity === "day") {
-        contractTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(createdAt,'%Y-%m-%d') as date, COUNT(*) as count FROM ContractSession WHERE createdAt >= ${startDate} GROUP BY date ORDER BY date ASC`;
+        contractTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(createdAt,'%Y-%m-%d') as date, COUNT(*) as count FROM ContractSession WHERE createdAt >= ${startDate} GROUP BY DATE_FORMAT(createdAt,'%Y-%m-%d') ORDER BY 1 ASC`;
     } else if (granularity === "week") {
-        contractTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY),'%Y-%m-%d') as date, COUNT(*) as count FROM ContractSession WHERE createdAt >= ${startDate} GROUP BY date ORDER BY date ASC`;
+        contractTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY),'%Y-%m-%d') as date, COUNT(*) as count FROM ContractSession WHERE createdAt >= ${startDate} GROUP BY DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY),'%Y-%m-%d') ORDER BY 1 ASC`;
     } else {
-        contractTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(createdAt,'%Y-%m') as date, COUNT(*) as count FROM ContractSession WHERE createdAt >= ${startDate} GROUP BY date ORDER BY date ASC`;
+        contractTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(createdAt,'%Y-%m') as date, COUNT(*) as count FROM ContractSession WHERE createdAt >= ${startDate} GROUP BY DATE_FORMAT(createdAt,'%Y-%m') ORDER BY 1 ASC`;
     }
 
     // ── Documents ──
@@ -446,11 +449,11 @@ router.get("/content/overview", authenticate, requireSuperAdmin, asyncHandler(as
 
     let docTimeseries: Array<{ date: string; count: bigint }>;
     if (granularity === "day") {
-        docTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(createdAt,'%Y-%m-%d') as date, COUNT(*) as count FROM GeneratedDocument WHERE createdAt >= ${startDate} GROUP BY date ORDER BY date ASC`;
+        docTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(createdAt,'%Y-%m-%d') as date, COUNT(*) as count FROM GeneratedDocument WHERE createdAt >= ${startDate} GROUP BY DATE_FORMAT(createdAt,'%Y-%m-%d') ORDER BY 1 ASC`;
     } else if (granularity === "week") {
-        docTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY),'%Y-%m-%d') as date, COUNT(*) as count FROM GeneratedDocument WHERE createdAt >= ${startDate} GROUP BY date ORDER BY date ASC`;
+        docTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY),'%Y-%m-%d') as date, COUNT(*) as count FROM GeneratedDocument WHERE createdAt >= ${startDate} GROUP BY DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY),'%Y-%m-%d') ORDER BY 1 ASC`;
     } else {
-        docTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(createdAt,'%Y-%m') as date, COUNT(*) as count FROM GeneratedDocument WHERE createdAt >= ${startDate} GROUP BY date ORDER BY date ASC`;
+        docTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(createdAt,'%Y-%m') as date, COUNT(*) as count FROM GeneratedDocument WHERE createdAt >= ${startDate} GROUP BY DATE_FORMAT(createdAt,'%Y-%m') ORDER BY 1 ASC`;
     }
 
     // ── Files ──
@@ -462,11 +465,11 @@ router.get("/content/overview", authenticate, requireSuperAdmin, asyncHandler(as
 
     let fileTimeseries: Array<{ date: string; count: bigint }>;
     if (granularity === "day") {
-        fileTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(createdAt,'%Y-%m-%d') as date, COUNT(*) as count FROM UserFile WHERE createdAt >= ${startDate} GROUP BY date ORDER BY date ASC`;
+        fileTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(createdAt,'%Y-%m-%d') as date, COUNT(*) as count FROM UserFile WHERE createdAt >= ${startDate} GROUP BY DATE_FORMAT(createdAt,'%Y-%m-%d') ORDER BY 1 ASC`;
     } else if (granularity === "week") {
-        fileTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY),'%Y-%m-%d') as date, COUNT(*) as count FROM UserFile WHERE createdAt >= ${startDate} GROUP BY date ORDER BY date ASC`;
+        fileTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY),'%Y-%m-%d') as date, COUNT(*) as count FROM UserFile WHERE createdAt >= ${startDate} GROUP BY DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY),'%Y-%m-%d') ORDER BY 1 ASC`;
     } else {
-        fileTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(createdAt,'%Y-%m') as date, COUNT(*) as count FROM UserFile WHERE createdAt >= ${startDate} GROUP BY date ORDER BY date ASC`;
+        fileTimeseries = await prisma.$queryRaw`SELECT DATE_FORMAT(createdAt,'%Y-%m') as date, COUNT(*) as count FROM UserFile WHERE createdAt >= ${startDate} GROUP BY DATE_FORMAT(createdAt,'%Y-%m') ORDER BY 1 ASC`;
     }
 
     // ── Feedback ──
@@ -482,7 +485,7 @@ router.get("/content/overview", authenticate, requireSuperAdmin, asyncHandler(as
                 SUM(CASE WHEN feedback='like' THEN 1 ELSE 0 END) as likes,
                 SUM(CASE WHEN feedback='dislike' THEN 1 ELSE 0 END) as dislikes
             FROM Message WHERE feedback IS NOT NULL AND createdAt >= ${startDate}
-            GROUP BY date ORDER BY date ASC
+            GROUP BY DATE_FORMAT(createdAt,'%Y-%m-%d') ORDER BY 1 ASC
         `;
     } else {
         feedbackRows = await prisma.$queryRaw`
@@ -490,7 +493,7 @@ router.get("/content/overview", authenticate, requireSuperAdmin, asyncHandler(as
                 SUM(CASE WHEN feedback='like' THEN 1 ELSE 0 END) as likes,
                 SUM(CASE WHEN feedback='dislike' THEN 1 ELSE 0 END) as dislikes
             FROM Message WHERE feedback IS NOT NULL AND createdAt >= ${startDate}
-            GROUP BY date ORDER BY date ASC
+            GROUP BY DATE_FORMAT(createdAt,'%Y-%m') ORDER BY 1 ASC
         `;
     }
 
