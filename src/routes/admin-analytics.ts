@@ -221,17 +221,18 @@ router.get("/engagement/timeseries", authenticate, requireSuperAdmin, asyncHandl
     const range = (req.query.range as string) || "30d";
     const { startDate, granularity } = parseDateRange(range);
 
-    let msgRows: Array<{ date: string; count: bigint }>;
-    let chatRows: Array<{ date: string; count: bigint }>;
+    type TsRow = Array<{ date: string; count: bigint }>;
+    let msgRows: TsRow;
+    let chatRows: TsRow;
 
     if (granularity === "day") {
         [msgRows, chatRows] = await Promise.all([
-            prisma.$queryRaw`
+            prisma.$queryRaw<TsRow>`
                 SELECT DATE_FORMAT(createdAt, '%Y-%m-%d') as date, COUNT(*) as count
                 FROM Message WHERE createdAt >= ${startDate} AND role = 'user'
                 GROUP BY DATE_FORMAT(createdAt, '%Y-%m-%d') ORDER BY date ASC
             `,
-            prisma.$queryRaw`
+            prisma.$queryRaw<TsRow>`
                 SELECT DATE_FORMAT(createdAt, '%Y-%m-%d') as date, COUNT(*) as count
                 FROM Chat WHERE createdAt >= ${startDate}
                 GROUP BY DATE_FORMAT(createdAt, '%Y-%m-%d') ORDER BY date ASC
@@ -239,12 +240,12 @@ router.get("/engagement/timeseries", authenticate, requireSuperAdmin, asyncHandl
         ]);
     } else if (granularity === "week") {
         [msgRows, chatRows] = await Promise.all([
-            prisma.$queryRaw`
+            prisma.$queryRaw<TsRow>`
                 SELECT DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY), '%Y-%m-%d') as date, COUNT(*) as count
                 FROM Message WHERE createdAt >= ${startDate} AND role = 'user'
                 GROUP BY DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY), '%Y-%m-%d') ORDER BY date ASC
             `,
-            prisma.$queryRaw`
+            prisma.$queryRaw<TsRow>`
                 SELECT DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY), '%Y-%m-%d') as date, COUNT(*) as count
                 FROM Chat WHERE createdAt >= ${startDate}
                 GROUP BY DATE_FORMAT(DATE_SUB(createdAt, INTERVAL WEEKDAY(createdAt) DAY), '%Y-%m-%d') ORDER BY date ASC
@@ -252,12 +253,12 @@ router.get("/engagement/timeseries", authenticate, requireSuperAdmin, asyncHandl
         ]);
     } else {
         [msgRows, chatRows] = await Promise.all([
-            prisma.$queryRaw`
+            prisma.$queryRaw<TsRow>`
                 SELECT DATE_FORMAT(createdAt, '%Y-%m') as date, COUNT(*) as count
                 FROM Message WHERE createdAt >= ${startDate} AND role = 'user'
                 GROUP BY DATE_FORMAT(createdAt, '%Y-%m') ORDER BY date ASC
             `,
-            prisma.$queryRaw`
+            prisma.$queryRaw<TsRow>`
                 SELECT DATE_FORMAT(createdAt, '%Y-%m') as date, COUNT(*) as count
                 FROM Chat WHERE createdAt >= ${startDate}
                 GROUP BY DATE_FORMAT(createdAt, '%Y-%m') ORDER BY date ASC
