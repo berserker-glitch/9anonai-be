@@ -17,7 +17,7 @@
         "@types/multer": "^2.0.0",
         "@types/node-cron": "^3.0.11",
         "@types/pdfkit": "^0.17.4",
-        "apache-arrow": "^21.1.0",
+        "apache-arrow": "^18.1.0",
         "arabic-reshaper": "^1.1.0",
         "bcryptjs": "^3.0.3",
         "cors": "^2.8.5",
