@@ -17,7 +17,10 @@ model User {
   marketingSource String?
   isOnboarded     Boolean   @default(false)
   feedbackDismissed Boolean @default(false) // Whether user has dismissed the feedback form modal
+  dismissedTips   String?   @db.Text        // JSON array of dismissed tip IDs
   role          String    @default("user")  // "user" | "superadmin"
+  lastLoginAt   DateTime?                   // Timestamp of most recent login
+  lastActiveAt  DateTime?                   // Timestamp of most recent chat message
   createdAt     DateTime  @default(now())
   chats         Chat[]
   files         UserFile[]
@@ -26,14 +29,15 @@ model User {
 }
 
 model Chat {
-  id        String    @id @default(cuid())
-  title     String
-  isPinned  Boolean   @default(false)
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages  Message[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id         String    @id @default(cuid())
+  title      String
+  isPinned   Boolean   @default(false)
+  shareToken String?   @unique  // Public share token for read-only link
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages   Message[]
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 }
 
 model Message {
@@ -97,6 +101,15 @@ model ContractSession {
   messages      ContractMessage[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+/** Newsletter / blog email subscribers */
+model Subscriber {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  lang      String   @default("ar")   // "ar" | "fr" | "en"
+  source    String   @default("blog") // "blog" | "sticky_bar" | "other"
+  createdAt DateTime @default(now())
 }
 
 /** Individual chat messages within a contract builder session */
