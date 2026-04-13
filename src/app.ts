@@ -18,10 +18,12 @@ import adminRouter from "./routes/admin";
 import adminAnalyticsRouter from "./routes/admin-analytics";
 import pdfRouter from "./routes/pdf";
 import contractBuilderRouter from "./routes/contract-builder";
+import newsletterRouter from "./routes/newsletter";
 
 // Middleware
 import { requestLogger, errorHandler, notFoundHandler } from "./middleware";
 import { logger } from "./services/logger";
+import { initEmailScheduler } from "./services/email-scheduler";
 
 // Configuration
 import { config } from "./config";
@@ -88,6 +90,7 @@ app.use("/api/admin", adminRouter);    // Admin dashboard
 app.use("/api/admin/analytics", adminAnalyticsRouter); // Admin analytics
 app.use("/api/pdf", pdfRouter);        // PDF contract generation
 app.use("/api/contract-builder", contractBuilderRouter); // Contract Builder
+app.use("/api/newsletter", newsletterRouter);           // Newsletter subscriptions
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Health Check Endpoint
@@ -108,6 +111,9 @@ app.use(errorHandler);
 // ─────────────────────────────────────────────────────────────────────────────
 // Server Initialization
 // ─────────────────────────────────────────────────────────────────────────────
+// Initialize email scheduler (re-engagement cron jobs)
+initEmailScheduler();
+
 const server = app.listen(PORT, () => {
     logger.info(`
     🚀 9anon Legal AI Backend is running!
