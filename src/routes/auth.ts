@@ -16,6 +16,7 @@ import {
     AuthenticatedRequest
 } from "../middleware/auth";
 import { asyncHandler, HttpErrors } from "../middleware/error-handler";
+import { sendWelcomeEmail } from "../services/email";
 
 const router = Router();
 
@@ -83,6 +84,7 @@ const authLimiter = rateLimit({
     message: { error: 'Too many attempts, please try again later' },
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { keyGeneratorIpFallback: false }, // suppress IPv6 keyGenerator warning
     keyGenerator: (req) => req.ip || 'unknown',
 });
 
@@ -124,6 +126,11 @@ router.post("/register", authLimiter, asyncHandler(async (req: Request, res: Res
 
     logAuthEvent("register", user.id, true, `New user registered: ${email}`);
     logger.info(`[AUTH] New user registered: ${user.id}`);
+
+    // Send welcome email (fire-and-forget — don't block registration response)
+    sendWelcomeEmail(email, name).catch((err) =>
+        logger.error("[AUTH] Failed to send welcome email", { error: err?.message })
+    );
 
     res.status(201).json({
         message: "User created successfully",
@@ -167,6 +174,9 @@ router.post("/login", authLimiter, asyncHandler(async (req: Request, res: Respon
 
     // Generate JWT token
     const token = generateToken(user.id, user.email, user.role);
+
+    // Track login timestamp (non-blocking)
+    prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }).catch(() => {});
 
     logAuthEvent("login", user.id, true);
     logger.info(`[AUTH] User logged in: ${user.id}`);
