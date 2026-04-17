@@ -19,6 +19,7 @@ model User {
   feedbackDismissed Boolean @default(false) // Whether user has dismissed the feedback form modal
   dismissedTips   String?   @db.Text        // JSON array of dismissed tip IDs
   role          String    @default("user")  // "user" | "superadmin"
+  isFavorite    Boolean   @default(false)   // Admin-marked favorite user for quick filtering
   lastLoginAt   DateTime?                   // Timestamp of most recent login
   lastActiveAt  DateTime?                   // Timestamp of most recent chat message
   createdAt     DateTime  @default(now())
