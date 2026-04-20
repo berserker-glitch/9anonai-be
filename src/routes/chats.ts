@@ -144,6 +144,42 @@ router.post("/", authenticate, asyncHandler(async (req: Request, res: Response) 
 }));
 
 /**
+ * GET /api/chats/shared/:token
+ * Retrieves a shared chat by its public token. No auth required.
+ * IMPORTANT: Must be defined before /:id to avoid Express matching "shared" as an :id param.
+ *
+ * @route GET /api/chats/shared/:token
+ * @returns {object} 200 - Chat with messages (public read-only view)
+ */
+router.get("/shared/:token", asyncHandler(async (req: Request, res: Response) => {
+    const { token } = req.params;
+
+    const chat = await prisma.chat.findUnique({
+        where: { shareToken: token },
+        select: {
+            id: true,
+            title: true,
+            createdAt: true,
+            messages: {
+                where: { isActive: true },
+                orderBy: { createdAt: "asc" },
+                select: {
+                    id: true,
+                    role: true,
+                    content: true,
+                    sources: true,
+                    createdAt: true,
+                },
+            },
+        },
+    });
+
+    if (!chat) throw HttpErrors.notFound("Shared chat");
+
+    res.json(chat);
+}));
+
+/**
  * GET /api/chats/:id
  * Retrieves a chat with all its messages.
  * 
@@ -523,41 +559,6 @@ router.delete("/:id/share", authenticate, asyncHandler(async (req: Request, res:
     await prisma.chat.update({ where: { id }, data: { shareToken: null } });
     logger.info(`[CHATS] Share token revoked for chat ${id}`);
     res.json({ success: true });
-}));
-
-/**
- * GET /api/chats/shared/:token
- * Retrieves a shared chat by its public token. No auth required.
- *
- * @route GET /api/chats/shared/:token
- * @returns {object} 200 - Chat with messages (public read-only view)
- */
-router.get("/shared/:token", asyncHandler(async (req: Request, res: Response) => {
-    const { token } = req.params;
-
-    const chat = await prisma.chat.findUnique({
-        where: { shareToken: token },
-        select: {
-            id: true,
-            title: true,
-            createdAt: true,
-            messages: {
-                where: { isActive: true },
-                orderBy: { createdAt: "asc" },
-                select: {
-                    id: true,
-                    role: true,
-                    content: true,
-                    sources: true,
-                    createdAt: true,
-                },
-            },
-        },
-    });
-
-    if (!chat) throw HttpErrors.notFound("Shared chat");
-
-    res.json(chat);
 }));
 
 export default router;
