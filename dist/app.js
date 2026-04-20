@@ -18,11 +18,14 @@ const auth_1 = __importDefault(require("./routes/auth"));
 const chats_1 = __importDefault(require("./routes/chats"));
 const upload_1 = __importDefault(require("./routes/upload"));
 const admin_1 = __importDefault(require("./routes/admin"));
+const admin_analytics_1 = __importDefault(require("./routes/admin-analytics"));
 const pdf_1 = __importDefault(require("./routes/pdf"));
 const contract_builder_1 = __importDefault(require("./routes/contract-builder"));
+const newsletter_1 = __importDefault(require("./routes/newsletter"));
 // Middleware
 const middleware_1 = require("./middleware");
 const logger_1 = require("./services/logger");
+const email_scheduler_1 = require("./services/email-scheduler");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 4000;
 // ─────────────────────────────────────────────────────────────────────────────
@@ -75,8 +78,10 @@ app.use("/api/auth", auth_1.default); // Auth (register, login)
 app.use("/api/chats", chats_1.default); // Chat persistence (CRUD)
 app.use("/api/upload", upload_1.default); // File uploads
 app.use("/api/admin", admin_1.default); // Admin dashboard
+app.use("/api/admin/analytics", admin_analytics_1.default); // Admin analytics
 app.use("/api/pdf", pdf_1.default); // PDF contract generation
 app.use("/api/contract-builder", contract_builder_1.default); // Contract Builder
+app.use("/api/newsletter", newsletter_1.default); // Newsletter subscriptions
 // ─────────────────────────────────────────────────────────────────────────────
 // Health Check Endpoint
 // ─────────────────────────────────────────────────────────────────────────────
@@ -94,6 +99,8 @@ app.use(middleware_1.errorHandler);
 // ─────────────────────────────────────────────────────────────────────────────
 // Server Initialization
 // ─────────────────────────────────────────────────────────────────────────────
+// Initialize email scheduler (re-engagement cron jobs)
+(0, email_scheduler_1.initEmailScheduler)();
 const server = app.listen(PORT, () => {
     logger_1.logger.info(`
     🚀 9anon Legal AI Backend is running!

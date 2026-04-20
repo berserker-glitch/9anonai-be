@@ -47,6 +47,7 @@ const chatLimiter = (0, express_rate_limit_1.default)({
     message: { error: 'Too many requests, please slow down' },
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { keyGeneratorIpFallback: false }, // suppress IPv6 keyGenerator warning
     keyGenerator: (req) => req.userId || req.ip || 'unknown',
 });
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,6 +153,8 @@ router.post("/", auth_1.optionalAuth, chatLimiter, async (req, res) => {
                         });
                         logger_1.logger.info(`[CHAT] Saved assistant response to chat ${chatId}`);
                         logger_1.logger.debug(`[PERSISTENCE] Saved to chat ${chatId}`);
+                        // Track activity timestamp (fire-and-forget)
+                        prisma_1.prisma.user.update({ where: { id: userId }, data: { lastActiveAt: new Date() } }).catch(() => { });
                     }
                     else {
                         logger_1.logger.warn(`[CHAT] Skipped saving: Chat ${chatId} not found or mismatch for user ${userId}`);

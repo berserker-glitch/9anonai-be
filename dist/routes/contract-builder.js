@@ -381,6 +381,45 @@ router.post("/sessions/:id/export", auth_1.authenticate, async (req, res) => {
     }
 });
 // ─────────────────────────────────────────────────────────────────────────────
+// PATCH /sessions/:id/title — Rename a contract session
+// ─────────────────────────────────────────────────────────────────────────────
+const renameTitleSchema = zod_1.z.object({
+    title: zod_1.z.string().min(1, "Title cannot be empty").max(100, "Title too long"),
+});
+/**
+ * Renames a contract session's title.
+ * Verifies the session belongs to the authenticated user.
+ */
+router.patch("/sessions/:id/title", auth_1.authenticate, async (req, res) => {
+    try {
+        const authReq = req;
+        const userId = authReq.userId;
+        const { id } = req.params;
+        if (!userId) {
+            return res.status(401).json({ error: "Authentication required" });
+        }
+        const parsed = renameTitleSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: "Invalid title", details: parsed.error.flatten() });
+        }
+        const session = await prisma_1.prisma.contractSession.findFirst({ where: { id, userId } });
+        if (!session) {
+            return res.status(404).json({ error: "Session not found" });
+        }
+        const updated = await prisma_1.prisma.contractSession.update({
+            where: { id },
+            data: { title: parsed.data.title },
+            select: { id: true, title: true },
+        });
+        (0, logger_1.logDbOperation)("UPDATE", "ContractSession", true, `id=${id}, title=${parsed.data.title}`);
+        return res.json(updated);
+    }
+    catch (error) {
+        logger_1.logger.error("[CONTRACT-ROUTES] Failed to rename session:", error);
+        return res.status(500).json({ error: "Failed to rename session" });
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
 // DELETE /sessions/:id — Delete a contract session
 // ─────────────────────────────────────────────────────────────────────────────
 /**

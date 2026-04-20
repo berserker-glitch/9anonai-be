@@ -76,7 +76,41 @@ router.get("/:id", auth_1.authenticate, async (req, res) => {
 });
 // GET /api/pdf/download/:id - Download a generated document
 router.get("/download/:id", auth_1.authenticate, async (req, res) => {
-    return res.status(404).json({ error: "Downloads are disabled." });
+    try {
+        const userId = req.userId;
+        const { id } = req.params;
+        const document = await prisma_1.prisma.generatedDocument.findUnique({
+            where: { id, userId },
+        });
+        if (!document) {
+            return res.status(404).json({ error: "Document not found" });
+        }
+        // Validate path to prevent directory traversal attacks
+        const filepath = path_1.default.resolve(document.path);
+        if (!filepath.startsWith(GENERATED_PDFS_DIR)) {
+            logger_1.logger.error(`[PDF] Path traversal attempt blocked: ${document.path}`);
+            return res.status(400).json({ error: "Invalid file path" });
+        }
+        if (!fs_1.default.existsSync(filepath)) {
+            logger_1.logger.error(`[PDF] File not found on disk: ${filepath}`);
+            return res.status(404).json({ error: "File not found on disk" });
+        }
+        logger_1.logger.info(`[PDF] Serving download for document ${id}, user ${userId}`);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(document.filename)}"`);
+        res.sendFile(filepath, (err) => {
+            if (err) {
+                logger_1.logger.error("[PDF] Error sending file:", { error: err });
+                if (!res.headersSent) {
+                    res.status(500).json({ error: "Failed to send file" });
+                }
+            }
+        });
+    }
+    catch (error) {
+        logger_1.logger.error("[PDF] Error downloading document:", { error });
+        return res.status(500).json({ error: "Failed to download document" });
+    }
 });
 // DELETE /api/pdf/:id - Delete a generated document
 router.delete("/:id", auth_1.authenticate, async (req, res) => {

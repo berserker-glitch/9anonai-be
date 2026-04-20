@@ -16,6 +16,7 @@ const prisma_1 = require("../services/prisma");
 const logger_1 = require("../services/logger");
 const auth_1 = require("../middleware/auth");
 const error_handler_1 = require("../middleware/error-handler");
+const email_1 = require("../services/email");
 const router = (0, express_1.Router)();
 // ─────────────────────────────────────────────────────────────────────────────
 // Validation Schemas
@@ -74,6 +75,7 @@ const authLimiter = (0, express_rate_limit_1.default)({
     message: { error: 'Too many attempts, please try again later' },
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { keyGeneratorIpFallback: false }, // suppress IPv6 keyGenerator warning
     keyGenerator: (req) => req.ip || 'unknown',
 });
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,6 +110,8 @@ router.post("/register", authLimiter, (0, error_handler_1.asyncHandler)(async (r
     const token = (0, auth_1.generateToken)(user.id, user.email, user.role);
     (0, logger_1.logAuthEvent)("register", user.id, true, `New user registered: ${email}`);
     logger_1.logger.info(`[AUTH] New user registered: ${user.id}`);
+    // Send welcome email (fire-and-forget — don't block registration response)
+    (0, email_1.sendWelcomeEmail)(email, name).catch((err) => logger_1.logger.error("[AUTH] Failed to send welcome email", { error: err?.message }));
     res.status(201).json({
         message: "User created successfully",
         token,
@@ -146,6 +150,8 @@ router.post("/login", authLimiter, (0, error_handler_1.asyncHandler)(async (req,
     }
     // Generate JWT token
     const token = (0, auth_1.generateToken)(user.id, user.email, user.role);
+    // Track login timestamp (non-blocking)
+    prisma_1.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }).catch(() => { });
     (0, logger_1.logAuthEvent)("login", user.id, true);
     logger_1.logger.info(`[AUTH] User logged in: ${user.id}`);
     res.json({

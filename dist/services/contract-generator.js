@@ -37,7 +37,15 @@ function containsArabic(text) {
     return /[\u0600-\u06FF]/.test(text);
 }
 /**
+ * Detect if the content is already HTML (has actual HTML tags, not just text)
+ */
+function isHtmlContent(content) {
+    // Check for common HTML structural tags (not just inline like <br>)
+    return /<(?:h[1-6]|p|div|ol|ul|li|table|section|article|header|strong|em)\b/i.test(content);
+}
+/**
  * Convert markdown-like content to HTML
+ * Used only for plain-text/markdown content — NOT for content that's already HTML
  */
 function contentToHtml(content) {
     const lines = content.split('\n');
@@ -83,16 +91,19 @@ function contentToHtml(content) {
     return html;
 }
 /**
- * Generate HTML template for A4 PDF
+ * Generate the full HTML document for PDF rendering.
+ * Handles both raw HTML content (from contract builder) and plain text/markdown.
  */
 function generateHtmlTemplate(title, content, language, timestamp) {
     const isRTL = language === 'ar' || containsArabic(content);
     const direction = isRTL ? 'rtl' : 'ltr';
     const textAlign = isRTL ? 'right' : 'left';
     const fontFamily = isRTL ? "'Amiri', 'Traditional Arabic', 'Arial', serif" : "'Times New Roman', serif";
-    // Sanitize user-provided content before converting to HTML
+    // Sanitize the title (always plain text)
     const safeTitle = escapeHtml(title);
-    const contentHtml = contentToHtml(content);
+    // If the content is already HTML (from the contract builder AI), use it directly.
+    // Otherwise, convert markdown/plain text to HTML.
+    const contentHtml = isHtmlContent(content) ? content : contentToHtml(content);
     return `
 <!DOCTYPE html>
 <html lang="${language}" dir="${direction}">
@@ -106,105 +117,119 @@ function generateHtmlTemplate(title, content, language, timestamp) {
             size: A4;
             margin: 20mm;
         }
-        
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: ${fontFamily};
             font-size: 12pt;
-            line-height: 1.6;
+            line-height: 1.8;
             direction: ${direction};
             text-align: ${textAlign};
-            color: #333;
+            color: #222;
             padding: 0;
         }
-        
+
         .header {
             text-align: ${isRTL ? 'left' : 'right'};
             font-size: 9pt;
-            color: #666;
-            margin-bottom: 30px;
+            color: #888;
+            margin-bottom: 20px;
             border-bottom: 1px solid #ddd;
-            padding-bottom: 10px;
+            padding-bottom: 8px;
         }
-        
-        .title {
-            text-align: center;
-            font-size: 18pt;
-            font-weight: bold;
-            margin-bottom: 30px;
-            color: #1a1a1a;
-        }
-        
+
         .content {
             margin-bottom: 30px;
         }
-        
-        h1 {
-            font-size: 16pt;
+
+        /* ── Typography for AI-generated contract HTML ── */
+
+        .content h1 {
+            font-size: 18pt;
+            font-weight: bold;
             text-align: center;
-            margin: 20px 0 15px;
-            color: #1a1a1a;
+            margin: 10px 0 20px;
+            color: #111;
         }
-        
-        h2 {
-            font-size: 14pt;
-            margin: 18px 0 12px;
-            color: #2a2a2a;
+
+        .content h2 {
+            font-size: 13pt;
+            font-weight: bold;
+            margin: 22px 0 8px;
+            color: #222;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 4px;
         }
-        
-        h3 {
+
+        .content h3 {
             font-size: 12pt;
-            margin: 15px 0 10px;
-            color: #3a3a3a;
+            font-weight: bold;
+            margin: 18px 0 6px;
+            color: #333;
         }
-        
-        p {
-            margin: 8px 0;
+
+        .content p {
+            margin: 6px 0;
             text-align: justify;
         }
-        
+
+        .content ol, .content ul {
+            margin: 8px 0;
+            padding-left: ${isRTL ? '0' : '25px'};
+            padding-right: ${isRTL ? '25px' : '0'};
+        }
+
+        .content li {
+            margin: 4px 0;
+        }
+
+        .content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
+
+        .content table td,
+        .content table th {
+            border: 1px solid #ccc;
+            padding: 6px 10px;
+            text-align: ${textAlign};
+        }
+
+        .content table th {
+            background: #f5f5f5;
+            font-weight: bold;
+        }
+
         strong {
             font-weight: bold;
         }
-        
+
+        em {
+            font-style: italic;
+        }
+
         .footer {
             margin-top: 40px;
-            padding-top: 20px;
+            padding-top: 15px;
             border-top: 1px solid #ddd;
             font-size: 9pt;
             color: #666;
             text-align: center;
         }
-        
-        .signatures {
-            margin-top: 50px;
-            display: flex;
-            justify-content: space-between;
-        }
-        
-        .signature-block {
-            text-align: center;
-            width: 45%;
-        }
-        
-        .signature-line {
-            border-top: 1px solid #333;
-            margin-top: 50px;
-            padding-top: 10px;
-        }
-        
+
         .legal-notice {
-            margin-top: 30px;
-            padding: 15px;
+            margin-top: 20px;
+            padding: 12px;
             background: #f9f9f9;
             border: 1px solid #e0e0e0;
-            border-radius: 5px;
-            font-size: 10pt;
+            border-radius: 4px;
+            font-size: 9pt;
         }
     </style>
 </head>
@@ -213,38 +238,43 @@ function generateHtmlTemplate(title, content, language, timestamp) {
         <div>9anon - Moroccan Legal AI</div>
         <div>Document ID: ${timestamp}</div>
     </div>
-    
-    <div class="title">${safeTitle}</div>
-    
+
     <div class="content">
         ${contentHtml}
     </div>
-    
+
     <div class="footer">
         <div class="legal-notice">
-            <strong>${isRTL ? 'ملاحظة قانونية:' : 'Legal Notice:'}</strong><br/>
+            <strong>${isRTL ? 'ملاحظة قانونية:' : language === 'fr' ? 'Mention légale :' : 'Legal Notice:'}</strong><br/>
             ${isRTL
         ? '1. يجب تصحيح الإمضاءات لدى السلطات المحلية (المقاطعة)<br/>2. يجب تسجيل العقد لدى إدارة الضرائب خلال 30 يوماً'
-        : '1. Legalize signatures at local authorities (Moqata\'a)<br/>2. Register with Tax Administration within 30 days'}
+        : language === 'fr'
+            ? '1. Les signatures doivent être légalisées auprès des autorités locales (Moqata\'a)<br/>2. Le contrat doit être enregistré auprès de l\'Administration fiscale dans les 30 jours'
+            : '1. Legalize signatures at local authorities (Moqata\'a)<br/>2. Register with Tax Administration within 30 days'}
         </div>
         <br/>
         <div>Generated by 9anon - Moroccan Legal AI Assistant</div>
-        <div>This document should be reviewed by a legal professional before signing.</div>
+        <div>${language === 'fr'
+        ? 'Ce document doit être revu par un professionnel du droit avant signature.'
+        : language === 'ar'
+            ? 'يجب مراجعة هذا المستند من قبل متخصص قانوني قبل التوقيع.'
+            : 'This document should be reviewed by a legal professional before signing.'}</div>
     </div>
 </body>
 </html>`;
 }
 /**
  * Generate PDF using Puppeteer (HTML to PDF)
- * Properly handles Arabic, French, and English
+ * Properly handles Arabic, French, and English.
+ * Detects whether content is raw HTML or markdown and processes accordingly.
  */
 async function generateFlexiblePDF(userId, title, content, type = "document", language = "en") {
     const userDir = ensureDirectoryExists(userId);
     const timestamp = Date.now();
     const filename = `${type}_${timestamp}.pdf`;
     const filepath = path_1.default.join(userDir, filename);
-    logger_1.logger.info(`[PDF] Generating PDF with Puppeteer: language=${language}, type=${type}`);
-    // Generate HTML
+    logger_1.logger.info(`[PDF] Generating PDF: language=${language}, type=${type}, isHtml=${isHtmlContent(content)}`);
+    // Generate the full HTML document
     const html = generateHtmlTemplate(title, content, language, timestamp);
     // Launch Puppeteer and generate PDF
     const browser = await puppeteer_1.default.launch({
@@ -253,7 +283,7 @@ async function generateFlexiblePDF(userId, title, content, type = "document", la
     });
     try {
         const page = await browser.newPage();
-        // Disable JavaScript execution in page context to prevent XSS during PDF render
+        // Disable JavaScript in page context to prevent XSS during PDF render
         await page.setJavaScriptEnabled(false);
         await page.setContent(html, { waitUntil: 'networkidle0' });
         // Generate A4 PDF
@@ -269,20 +299,13 @@ async function generateFlexiblePDF(userId, title, content, type = "document", la
             }
         });
         logger_1.logger.info(`[PDF] PDF generated successfully: ${filepath}`);
-        // Save to Database
+        // Save to database
         const doc = await prisma_1.prisma.generatedDocument.create({
             data: {
                 type,
                 title,
                 filename,
-                path: filepath, // OR relative path? FilesModal uses API to list.
-                // The API /download/:id uses filepath from DB to res.download.
-                // res.download checks fs.exists(document.path).
-                // So storing ABSOLUTE path is fine if backend runs on same machine.
-                // But usually relative is safer.
-                // However, pdf.ts code: `if (fs.existsSync(document.path))` implies absolute or relative to CWD.
-                // EnsureDirectoryExists returns absolute.
-                // So storing absolute path is consistent with current usage.
+                path: filepath,
                 userId,
                 metadata: JSON.stringify({ language })
             }
@@ -300,7 +323,7 @@ async function generateFlexiblePDF(userId, title, content, type = "document", la
     }
 }
 /**
- * Main contract generation function
+ * Main contract generation function (disabled — use generateFlexiblePDF)
  */
 async function generateContract(userId, data) {
     throw new Error("PDF generation is permanently disabled.");

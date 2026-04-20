@@ -7,6 +7,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const zod_1 = require("zod");
+const crypto_1 = require("crypto");
 const prisma_1 = require("../services/prisma");
 const title_generator_1 = require("../services/title-generator");
 const logger_1 = require("../services/logger");
@@ -125,6 +126,39 @@ router.post("/", auth_1.authenticate, (0, error_handler_1.asyncHandler)(async (r
     });
     (0, logger_1.logDbOperation)("create", "Chat", true, `Chat ${chat.id} created`);
     res.status(201).json(chat);
+}));
+/**
+ * GET /api/chats/shared/:token
+ * Retrieves a shared chat by its public token. No auth required.
+ * IMPORTANT: Must be defined before /:id to avoid Express matching "shared" as an :id param.
+ *
+ * @route GET /api/chats/shared/:token
+ * @returns {object} 200 - Chat with messages (public read-only view)
+ */
+router.get("/shared/:token", (0, error_handler_1.asyncHandler)(async (req, res) => {
+    const { token } = req.params;
+    const chat = await prisma_1.prisma.chat.findUnique({
+        where: { shareToken: token },
+        select: {
+            id: true,
+            title: true,
+            createdAt: true,
+            messages: {
+                where: { isActive: true },
+                orderBy: { createdAt: "asc" },
+                select: {
+                    id: true,
+                    role: true,
+                    content: true,
+                    sources: true,
+                    createdAt: true,
+                },
+            },
+        },
+    });
+    if (!chat)
+        throw error_handler_1.HttpErrors.notFound("Shared chat");
+    res.json(chat);
 }));
 /**
  * GET /api/chats/:id
@@ -406,6 +440,52 @@ router.patch("/:chatId/messages/:messageId/activate", auth_1.authenticate, (0, e
         data: { isActive: true }
     });
     logger_1.logger.debug(`[CHATS] Activated message version ${messageId}`);
+    res.json({ success: true });
+}));
+// ─────────────────────────────────────────────────────────────────────────────
+// Conversation Sharing Routes
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * POST /api/chats/:id/share
+ * Generates (or returns existing) a public share token for a chat.
+ *
+ * @route POST /api/chats/:id/share
+ * @security Bearer
+ * @returns {object} 200 - { shareToken, shareUrl }
+ */
+router.post("/:id/share", auth_1.authenticate, (0, error_handler_1.asyncHandler)(async (req, res) => {
+    const userId = req.userId;
+    const { id } = req.params;
+    const chat = await prisma_1.prisma.chat.findUnique({ where: { id, userId } });
+    if (!chat)
+        throw error_handler_1.HttpErrors.notFound("Chat");
+    // Return existing token or generate a new one
+    const token = chat.shareToken || (0, crypto_1.randomBytes)(16).toString("hex");
+    if (!chat.shareToken) {
+        await prisma_1.prisma.chat.update({ where: { id }, data: { shareToken: token } });
+    }
+    logger_1.logger.info(`[CHATS] Share token generated for chat ${id}`);
+    res.json({
+        shareToken: token,
+        shareUrl: `${process.env.FRONTEND_URL || "https://9anonai.com"}/shared/${token}`,
+    });
+}));
+/**
+ * DELETE /api/chats/:id/share
+ * Revokes the share token for a chat (makes the link invalid).
+ *
+ * @route DELETE /api/chats/:id/share
+ * @security Bearer
+ * @returns {object} 200 - Success
+ */
+router.delete("/:id/share", auth_1.authenticate, (0, error_handler_1.asyncHandler)(async (req, res) => {
+    const userId = req.userId;
+    const { id } = req.params;
+    const chat = await prisma_1.prisma.chat.findUnique({ where: { id, userId } });
+    if (!chat)
+        throw error_handler_1.HttpErrors.notFound("Chat");
+    await prisma_1.prisma.chat.update({ where: { id }, data: { shareToken: null } });
+    logger_1.logger.info(`[CHATS] Share token revoked for chat ${id}`);
     res.json({ success: true });
 }));
 exports.default = router;
