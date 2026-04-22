@@ -34,6 +34,7 @@ router.get("/users", auth_1.authenticate, auth_1.requireSuperAdmin, (0, error_ha
             isFavorite: true,
             createdAt: true,
             marketingSource: true,
+            googleId: true,
             _count: {
                 select: {
                     chats: true
@@ -70,6 +71,7 @@ router.get("/users", auth_1.authenticate, auth_1.requireSuperAdmin, (0, error_ha
             isFavorite: user.isFavorite,
             createdAt: user.createdAt,
             marketingSource: user.marketingSource,
+            authMethod: user.googleId ? "google" : "email",
             conversationCount: user._count.chats,
             messageCount: user.chats.reduce((total, chat) => total + chat._count.messages, 0),
             lastActive: new Date(maxUpdatedAt).toISOString()

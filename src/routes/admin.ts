@@ -37,6 +37,7 @@ router.get("/users", authenticate, requireSuperAdmin, asyncHandler(async (req: R
             isFavorite: true,
             createdAt: true,
             marketingSource: true,
+            googleId: true,
             _count: {
                 select: {
                     chats: true
@@ -75,6 +76,7 @@ router.get("/users", authenticate, requireSuperAdmin, asyncHandler(async (req: R
             isFavorite: user.isFavorite,
             createdAt: user.createdAt,
             marketingSource: user.marketingSource,
+            authMethod: user.googleId ? "google" : "email",
             conversationCount: user._count.chats,
             messageCount: user.chats.reduce((total, chat) => total + chat._count.messages, 0),
             lastActive: new Date(maxUpdatedAt).toISOString()
