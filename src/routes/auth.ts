@@ -165,6 +165,12 @@ router.post("/login", authLimiter, asyncHandler(async (req: Request, res: Respon
         throw HttpErrors.unauthorized("Invalid credentials");
     }
 
+    // Reject Google-only accounts trying to use password login
+    if (!user.password) {
+        logAuthEvent("login", user.id, false, "Google-only account tried password login");
+        throw HttpErrors.badRequest("This account uses Google sign-in. Please sign in with Google.");
+    }
+
     // Verify password
     const passwordMatch = await bcrypt.compare(password, user.password);
     if (!passwordMatch) {
@@ -324,6 +330,11 @@ router.post("/change-password", authenticate, authLimiter, asyncHandler(async (r
         throw HttpErrors.notFound("User");
     }
 
+    // Google-only accounts have no password to change
+    if (!user.password) {
+        throw HttpErrors.badRequest("This account uses Google sign-in and has no password to change.");
+    }
+
     // Verify current password
     const passwordMatch = await bcrypt.compare(currentPassword, user.password);
     if (!passwordMatch) {
@@ -342,6 +353,93 @@ router.post("/change-password", authenticate, authLimiter, asyncHandler(async (r
     logger.info(`[AUTH] Password changed for user ${userId}`);
 
     res.json({ message: "Password changed successfully" });
+}));
+
+/**
+ * POST /api/auth/google
+ * Authenticates (or registers) a user via Google OAuth2 access token.
+ * Verifies the token by calling Google's userinfo endpoint.
+ * If a matching email already exists, the accounts are linked automatically.
+ *
+ * @route POST /api/auth/google
+ * @param {string} req.body.credential - Google OAuth2 access token from the frontend popup
+ * @returns {object} 200 - JWT token and user data
+ * @returns {object} 400 - Invalid or missing credential
+ */
+router.post("/google", authLimiter, asyncHandler(async (req: Request, res: Response) => {
+    const { credential } = req.body;
+    if (!credential) {
+        throw HttpErrors.badRequest("Google credential is required");
+    }
+
+    // Verify the access token by fetching user info from Google
+    let payload: { sub: string; email: string; name?: string; picture?: string };
+    try {
+        const googleRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+            headers: { Authorization: `Bearer ${credential}` },
+        });
+        if (!googleRes.ok) throw new Error("Rejected by Google");
+        const info = await googleRes.json() as { sub?: string; email?: string; name?: string; picture?: string };
+        if (!info.sub || !info.email) throw new Error("Incomplete userinfo");
+        payload = { sub: info.sub, email: info.email, name: info.name, picture: info.picture };
+    } catch {
+        logAuthEvent("google-login", null, false, "Invalid Google token");
+        throw HttpErrors.unauthorized("Invalid Google token");
+    }
+
+    const { sub: googleId, email, name, picture } = payload;
+
+    // Look up by googleId first, then fall back to email (link existing account)
+    let user = await prisma.user.findUnique({ where: { googleId } });
+
+    if (!user) {
+        user = await prisma.user.findUnique({ where: { email } });
+
+        if (user) {
+            // Link existing email/password account to Google
+            user = await prisma.user.update({
+                where: { id: user.id },
+                data: { googleId },
+            });
+        } else {
+            // Create a new Google-only account
+            user = await prisma.user.create({
+                data: {
+                    email: email!,
+                    password: null,
+                    googleId,
+                    name: name ?? null,
+                    image: picture ?? null,
+                },
+            });
+
+            // Send welcome email (fire-and-forget)
+            sendWelcomeEmail(email!, name).catch((err) =>
+                logger.error("[AUTH] Failed to send welcome email", { error: err?.message })
+            );
+
+            logAuthEvent("register", user.id, true, `New user via Google: ${email}`);
+        }
+    }
+
+    // Update last login timestamp (non-blocking)
+    prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }).catch(() => {});
+
+    const token = generateToken(user.id, user.email, user.role);
+
+    logAuthEvent("google-login", user.id, true);
+    logger.info(`[AUTH] Google login: ${user.id}`);
+
+    res.json({
+        token,
+        user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            isOnboarded: user.isOnboarded,
+        },
+    });
 }));
 
 /**
