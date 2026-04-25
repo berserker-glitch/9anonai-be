@@ -158,15 +158,51 @@ async function perplexitySearch(query: string): Promise<string> {
 }
 
 /**
- * Detect language from text
+ * Fast regex-based language detection (sync fallback)
  */
-function detectLanguage(text: string): "en" | "fr" | "ar" {
-    // Arabic characters
+function detectLanguageRegex(text: string): string {
     if (/[\u0600-\u06FF]/.test(text)) return "ar";
-    // French indicators
     if (/\b(je|tu|il|nous|vous|ils|est|sont|avoir|être|pour|dans|avec|contrat|bail|travail)\b/i.test(text)) return "fr";
-    // Default to English
     return "en";
+}
+
+/**
+ * Model-based language detection using a fast LLM.
+ * Handles Darija, Spanish, and ambiguous short messages by enriching with history context.
+ * Falls back to regex on error.
+ */
+async function detectLanguageWithModel(text: string, history: any[] = []): Promise<string> {
+    // For short/ambiguous messages, include recent user history for context
+    const isShort = text.trim().split(/\s+/).length < 5;
+    const sampleText = isShort && history.length > 0
+        ? history.slice(-3).filter((m: any) => m.role === "user").map((m: any) => m.content).join(" ") + " " + text
+        : text;
+
+    try {
+        const response = await client.chat.completions.create({
+            model: "google/gemini-2.0-flash-001",
+            messages: [
+                {
+                    role: "system",
+                    content: `Detect the language of this text. Reply with ONE word only: English, French, Arabic, Darija, Spanish, or Other.\nDarija = Moroccan Arabic dialect (Latin script like "wach", "kifach", "chno", "bghit", "makaynch", or mixed Arabic-Latin-French).`
+                },
+                { role: "user", content: sampleText.slice(0, 500) }
+            ],
+            temperature: 0,
+            max_tokens: 10,
+        });
+
+        const raw = response.choices[0]?.message?.content?.trim().toLowerCase() || "";
+        if (raw.includes("french")) return "fr";
+        if (raw.includes("arabic")) return "ar";
+        if (raw.includes("darija")) return "darija";
+        if (raw.includes("spanish")) return "es";
+        if (raw.includes("english")) return "en";
+        return detectLanguageRegex(text);
+    } catch {
+        logger.warn("[LAWYER] Language detection model failed, using regex fallback");
+        return detectLanguageRegex(text);
+    }
 }
 
 /**
@@ -266,6 +302,16 @@ function analyzeComplexity(text: string): 'basic' | 'deep' {
 
 export type ImageInput = { data: string; mimeType: string };
 
+/** Language directive injected into prompts to enforce response language */
+const LANG_LABEL: Record<string, string> = {
+    en: "MANDATORY: You MUST respond ENTIRELY in English. The context documents may be in Arabic but your response MUST be in English.",
+    fr: "OBLIGATOIRE: Vous DEVEZ répondre ENTIÈREMENT en français. Les documents de contexte peuvent être en arabe mais votre réponse DOIT être en français.",
+    ar: "يجب أن تكون إجابتك بالكامل باللغة العربية.",
+    darija: "MANDATORY: The user is writing in Moroccan Darija. Respond in Moroccan Darija using the same script the user used (Latin or Arabic). You may use standard Arabic or French for legal terms when necessary.",
+    es: "OBLIGATORIO: Debes responder COMPLETAMENTE en español. Los documentos de contexto pueden estar en árabe pero tu respuesta DEBE ser en español.",
+    other: "MANDATORY: Respond in the EXACT SAME language as the user's message.",
+};
+
 export async function* getLegalAdviceStream(
     userQuery: string,
     history: any[] = [],
@@ -273,8 +319,10 @@ export async function* getLegalAdviceStream(
     userId?: string
 ): AsyncGenerator<StreamEvent, void, unknown> {
     try {
-        // Detect user's language
-        const userLang = detectLanguage(userQuery);
+        // Start model-based language detection immediately as a background promise.
+        // Regex fallback is used synchronously for anything that runs before the promise resolves.
+        const langDetectionPromise = detectLanguageWithModel(userQuery, history);
+        let userLang = detectLanguageRegex(userQuery);
 
         // Fetch User Personalization
         let personalizationContext = "";
@@ -299,7 +347,7 @@ export async function* getLegalAdviceStream(
                             if (parsed.spokenLanguage) {
                                 if (parsed.spokenLanguage === "auto") {
                                     // Detect language from user's query and make it explicit
-                                    const detectedLang = detectLanguage(userQuery);
+                                    const detectedLang = userLang;
                                     const langNames: Record<string, string> = { "en": "English", "fr": "French", "ar": "Arabic" };
                                     const detectedLangName = langNames[detectedLang] || "English";
                                     customContext += `USER LANGUAGE SETTING: Auto-detect is ON. The user's latest message is in ${detectedLangName}. You MUST respond in ${detectedLangName}.\n`;
@@ -366,10 +414,12 @@ INSTRUCTIONS:
 
         if (isObviouslyCasual(userQuery)) {
             intent = { type: "casual", subtype: "greeting" };
+            // Regex result is sufficient for obvious single-word patterns (hi, merci, شكرا)
             yield { type: "intent", intent };
         } else {
             yield { type: "step", content: "Analyzing your question..." };
-            intent = await classifyIntent(userQuery);
+            // Run language detection and intent classification in parallel — zero added latency
+            [userLang, intent] = await Promise.all([langDetectionPromise, classifyIntent(userQuery)]);
             yield { type: "intent", intent };
         }
 
@@ -388,10 +438,11 @@ INSTRUCTIONS:
         if (intent.type === "casual") {
             yield { type: "citation", sources: [] };
 
+            const casualLangDirective = LANG_LABEL[userLang] ?? LANG_LABEL.other;
             const stream = await client.chat.completions.create({
                 model: "google/gemini-3-flash-preview",
                 messages: [
-                    { role: "system", content: CASUAL_PROMPT + personalizationContext },
+                    { role: "system", content: CASUAL_PROMPT + personalizationContext + `\n\n[LANGUAGE RULE]: ${casualLangDirective}` },
                     ...history.slice(-10),
                     { role: "user", content: buildUserContent(userQuery) }
                 ],
@@ -451,12 +502,7 @@ INSTRUCTIONS:
 
             // Hard language enforcement — placed AFTER context (strongest position)
             // The context is in Arabic but the user may be asking in French/English
-            const langLabel: Record<string, string> = {
-                en: "MANDATORY: You MUST respond ENTIRELY in English. The context documents are in Arabic but your response MUST be in English.",
-                fr: "OBLIGATOIRE: Vous DEVEZ répondre ENTIÈREMENT en français. Les documents de contexte sont en arabe mais votre réponse DOIT être en français.",
-                ar: "يجب أن تكون إجابتك بالكامل باللغة العربية."
-            };
-            const langDirective = langLabel[userLang] || langLabel.en;
+            const langDirective = LANG_LABEL[userLang] ?? LANG_LABEL.en;
 
             const userContent = contextString
                 ? `[System Note]: ${confidenceNote}\n\nContext:\n${contextString}\n\n---\n\n[LANGUAGE RULE]: ${langDirective}\n\nQuestion: ${userQuery}`
