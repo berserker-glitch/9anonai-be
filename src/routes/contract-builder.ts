@@ -7,7 +7,7 @@
  */
 
 import { Router, Request, Response } from "express";
-import { authenticate, AuthenticatedRequest } from "../middleware/auth";
+import { authenticate, requireSuperAdmin, AuthenticatedRequest } from "../middleware/auth";
 import { getContractStream } from "../services/contract-builder-ai";
 import { generateFlexiblePDF } from "../services/contract-generator";
 import { prisma } from "../services/prisma";
@@ -15,6 +15,12 @@ import { logger, logDbOperation } from "../services/logger";
 import { z } from "zod";
 
 const router = Router();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin-only guard: Contract Builder is still in development.
+// All routes below require superadmin role.
+// ─────────────────────────────────────────────────────────────────────────────
+router.use(authenticate, requireSuperAdmin);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Validation Schemas
