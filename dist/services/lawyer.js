@@ -142,17 +142,56 @@ async function perplexitySearch(query) {
     }
 }
 /**
- * Detect language from text
+ * Fast regex-based language detection (sync fallback)
  */
-function detectLanguage(text) {
-    // Arabic characters
+function detectLanguageRegex(text) {
     if (/[\u0600-\u06FF]/.test(text))
         return "ar";
-    // French indicators
     if (/\b(je|tu|il|nous|vous|ils|est|sont|avoir|être|pour|dans|avec|contrat|bail|travail)\b/i.test(text))
         return "fr";
-    // Default to English
     return "en";
+}
+/**
+ * Model-based language detection using a fast LLM.
+ * Handles Darija, Spanish, and ambiguous short messages by enriching with history context.
+ * Falls back to regex on error.
+ */
+async function detectLanguageWithModel(text, history = []) {
+    // For short/ambiguous messages, include recent user history for context
+    const isShort = text.trim().split(/\s+/).length < 5;
+    const sampleText = isShort && history.length > 0
+        ? history.slice(-3).filter((m) => m.role === "user").map((m) => m.content).join(" ") + " " + text
+        : text;
+    try {
+        const response = await client.chat.completions.create({
+            model: "google/gemini-2.0-flash-001",
+            messages: [
+                {
+                    role: "system",
+                    content: `Detect the language of this text. Reply with ONE word only: English, French, Arabic, Darija, Spanish, or Other.\nDarija = Moroccan Arabic dialect (Latin script like "wach", "kifach", "chno", "bghit", "makaynch", or mixed Arabic-Latin-French).`
+                },
+                { role: "user", content: sampleText.slice(0, 500) }
+            ],
+            temperature: 0,
+            max_tokens: 10,
+        });
+        const raw = response.choices[0]?.message?.content?.trim().toLowerCase() || "";
+        if (raw.includes("french"))
+            return "fr";
+        if (raw.includes("arabic"))
+            return "ar";
+        if (raw.includes("darija"))
+            return "darija";
+        if (raw.includes("spanish"))
+            return "es";
+        if (raw.includes("english"))
+            return "en";
+        return detectLanguageRegex(text);
+    }
+    catch {
+        logger_1.logger.warn("[LAWYER] Language detection model failed, using regex fallback");
+        return detectLanguageRegex(text);
+    }
 }
 /**
  * Check if query is asking for document generation (FULLY FLEXIBLE)
@@ -235,10 +274,47 @@ function analyzeComplexity(text) {
         return 'deep';
     return 'basic';
 }
+/**
+ * Detect if an error is an OpenRouter "out of credits" / 402 error
+ */
+function isCreditsError(error) {
+    const msg = (error?.message || "").toLowerCase();
+    const status = error?.status || error?.statusCode;
+    return (status === 402 ||
+        msg.includes("insufficient credits") ||
+        msg.includes("out of credits") ||
+        msg.includes("no credits") ||
+        msg.includes("payment required") ||
+        msg.includes("402"));
+}
+const NO_CREDITS_MESSAGE = {
+    ar: "سؤالك مهم لنا. نواجه حاليًا ضغطًا تقنيًا مؤقتًا بسبب الطلب الكبير على الخدمة. نحن نعمل باستمرار على تحسين قدراتنا لاستيعاب المزيد من الأسئلة. يُرجى الاحتفاظ بسؤالك وإعادة طرحه بعد قليل.",
+    fr: "Votre question est importante pour nous. Nous rencontrons actuellement une surcharge technique temporaire due à la forte demande. Nous travaillons continuellement à améliorer notre service pour traiter davantage de questions. Veuillez conserver votre question et réessayer dans quelques instants.",
+    en: "Your question matters to us. We are currently experiencing a temporary overload due to high demand. We are continuously working to improve our capacity to handle more questions. Please keep your question and try again in a moment.",
+};
+function getNoCreditsMessage(lang) {
+    if (lang === "ar" || lang === "darija")
+        return NO_CREDITS_MESSAGE.ar;
+    if (lang === "fr")
+        return NO_CREDITS_MESSAGE.fr;
+    return NO_CREDITS_MESSAGE.en;
+}
+/** Language directive injected into prompts to enforce response language */
+const LANG_LABEL = {
+    en: "MANDATORY: You MUST respond ENTIRELY in English. The context documents may be in Arabic but your response MUST be in English.",
+    fr: "OBLIGATOIRE: Vous DEVEZ répondre ENTIÈREMENT en français. Les documents de contexte peuvent être en arabe mais votre réponse DOIT être en français.",
+    ar: "يجب أن تكون إجابتك بالكامل باللغة العربية.",
+    darija: "MANDATORY: The user is writing in Moroccan Darija. Respond in Moroccan Darija using the same script the user used (Latin or Arabic). You may use standard Arabic or French for legal terms when necessary.",
+    es: "OBLIGATORIO: Debes responder COMPLETAMENTE en español. Los documentos de contexto pueden estar en árabe pero tu respuesta DEBE ser en español.",
+    other: "MANDATORY: Respond in the EXACT SAME language as the user's message.",
+};
 async function* getLegalAdviceStream(userQuery, history = [], images = [], userId) {
+    // Detect language synchronously up-front — used in error messages even if all LLM calls fail.
+    let userLang = detectLanguageRegex(userQuery);
     try {
-        // Detect user's language
-        const userLang = detectLanguage(userQuery);
+        // Start model-based language detection immediately as a background promise.
+        // Regex fallback is used synchronously for anything that runs before the promise resolves.
+        const langDetectionPromise = detectLanguageWithModel(userQuery, history);
         // Fetch User Personalization
         let personalizationContext = "";
         if (userId) {
@@ -262,7 +338,7 @@ async function* getLegalAdviceStream(userQuery, history = [], images = [], userI
                             if (parsed.spokenLanguage) {
                                 if (parsed.spokenLanguage === "auto") {
                                     // Detect language from user's query and make it explicit
-                                    const detectedLang = detectLanguage(userQuery);
+                                    const detectedLang = userLang;
                                     const langNames = { "en": "English", "fr": "French", "ar": "Arabic" };
                                     const detectedLangName = langNames[detectedLang] || "English";
                                     customContext += `USER LANGUAGE SETTING: Auto-detect is ON. The user's latest message is in ${detectedLangName}. You MUST respond in ${detectedLangName}.\n`;
@@ -328,11 +404,13 @@ INSTRUCTIONS:
         let intent;
         if ((0, intent_classifier_1.isObviouslyCasual)(userQuery)) {
             intent = { type: "casual", subtype: "greeting" };
+            // Regex result is sufficient for obvious single-word patterns (hi, merci, شكرا)
             yield { type: "intent", intent };
         }
         else {
             yield { type: "step", content: "Analyzing your question..." };
-            intent = await (0, intent_classifier_1.classifyIntent)(userQuery);
+            // Run language detection and intent classification in parallel — zero added latency
+            [userLang, intent] = await Promise.all([langDetectionPromise, (0, intent_classifier_1.classifyIntent)(userQuery)]);
             yield { type: "intent", intent };
         }
         // Build user content with images if present
@@ -349,10 +427,11 @@ INSTRUCTIONS:
         // 2. Handle based on intent
         if (intent.type === "casual") {
             yield { type: "citation", sources: [] };
+            const casualLangDirective = LANG_LABEL[userLang] ?? LANG_LABEL.other;
             const stream = await client.chat.completions.create({
                 model: "google/gemini-3-flash-preview",
                 messages: [
-                    { role: "system", content: CASUAL_PROMPT + personalizationContext },
+                    { role: "system", content: CASUAL_PROMPT + personalizationContext + `\n\n[LANGUAGE RULE]: ${casualLangDirective}` },
                     ...history.slice(-10),
                     { role: "user", content: buildUserContent(userQuery) }
                 ],
@@ -406,12 +485,7 @@ INSTRUCTIONS:
             }
             // Hard language enforcement — placed AFTER context (strongest position)
             // The context is in Arabic but the user may be asking in French/English
-            const langLabel = {
-                en: "MANDATORY: You MUST respond ENTIRELY in English. The context documents are in Arabic but your response MUST be in English.",
-                fr: "OBLIGATOIRE: Vous DEVEZ répondre ENTIÈREMENT en français. Les documents de contexte sont en arabe mais votre réponse DOIT être en français.",
-                ar: "يجب أن تكون إجابتك بالكامل باللغة العربية."
-            };
-            const langDirective = langLabel[userLang] || langLabel.en;
+            const langDirective = LANG_LABEL[userLang] ?? LANG_LABEL.en;
             const userContent = contextString
                 ? `[System Note]: ${confidenceNote}\n\nContext:\n${contextString}\n\n---\n\n[LANGUAGE RULE]: ${langDirective}\n\nQuestion: ${userQuery}`
                 : `[System Note]: ${confidenceNote}\n\n[LANGUAGE RULE]: ${langDirective}\n\nQuestion: ${userQuery}`;
@@ -434,6 +508,13 @@ INSTRUCTIONS:
     }
     catch (error) {
         logger_1.logger.error("[LAWYER] LLM Error:", { error });
+        if (isCreditsError(error)) {
+            logger_1.logger.warn("[LAWYER] OpenRouter credits exhausted — sending user-facing message");
+            yield { type: "citation", sources: [] };
+            yield { type: "token", content: getNoCreditsMessage(userLang) };
+            yield { type: "done" };
+            return;
+        }
         yield { type: "step", content: "Error occurred during generation." };
         throw new Error("Failed to generate response.");
     }

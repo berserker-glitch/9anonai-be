@@ -302,6 +302,34 @@ function analyzeComplexity(text: string): 'basic' | 'deep' {
 
 export type ImageInput = { data: string; mimeType: string };
 
+/**
+ * Detect if an error is an OpenRouter "out of credits" / 402 error
+ */
+function isCreditsError(error: any): boolean {
+    const msg = (error?.message || "").toLowerCase();
+    const status = error?.status || error?.statusCode;
+    return (
+        status === 402 ||
+        msg.includes("insufficient credits") ||
+        msg.includes("out of credits") ||
+        msg.includes("no credits") ||
+        msg.includes("payment required") ||
+        msg.includes("402")
+    );
+}
+
+const NO_CREDITS_MESSAGE: Record<string, string> = {
+    ar: "سؤالك مهم لنا. نواجه حاليًا ضغطًا تقنيًا مؤقتًا بسبب الطلب الكبير على الخدمة. نحن نعمل باستمرار على تحسين قدراتنا لاستيعاب المزيد من الأسئلة. يُرجى الاحتفاظ بسؤالك وإعادة طرحه بعد قليل.",
+    fr: "Votre question est importante pour nous. Nous rencontrons actuellement une surcharge technique temporaire due à la forte demande. Nous travaillons continuellement à améliorer notre service pour traiter davantage de questions. Veuillez conserver votre question et réessayer dans quelques instants.",
+    en: "Your question matters to us. We are currently experiencing a temporary overload due to high demand. We are continuously working to improve our capacity to handle more questions. Please keep your question and try again in a moment.",
+};
+
+function getNoCreditsMessage(lang: string): string {
+    if (lang === "ar" || lang === "darija") return NO_CREDITS_MESSAGE.ar;
+    if (lang === "fr") return NO_CREDITS_MESSAGE.fr;
+    return NO_CREDITS_MESSAGE.en;
+}
+
 /** Language directive injected into prompts to enforce response language */
 const LANG_LABEL: Record<string, string> = {
     en: "MANDATORY: You MUST respond ENTIRELY in English. The context documents may be in Arabic but your response MUST be in English.",
@@ -318,11 +346,13 @@ export async function* getLegalAdviceStream(
     images: ImageInput[] = [],
     userId?: string
 ): AsyncGenerator<StreamEvent, void, unknown> {
+    // Detect language synchronously up-front — used in error messages even if all LLM calls fail.
+    let userLang = detectLanguageRegex(userQuery);
+
     try {
         // Start model-based language detection immediately as a background promise.
         // Regex fallback is used synchronously for anything that runs before the promise resolves.
         const langDetectionPromise = detectLanguageWithModel(userQuery, history);
-        let userLang = detectLanguageRegex(userQuery);
 
         // Fetch User Personalization
         let personalizationContext = "";
@@ -529,6 +559,15 @@ INSTRUCTIONS:
 
     } catch (error) {
         logger.error("[LAWYER] LLM Error:", { error });
+
+        if (isCreditsError(error)) {
+            logger.warn("[LAWYER] OpenRouter credits exhausted — sending user-facing message");
+            yield { type: "citation", sources: [] };
+            yield { type: "token", content: getNoCreditsMessage(userLang) };
+            yield { type: "done" };
+            return;
+        }
+
         yield { type: "step", content: "Error occurred during generation." };
         throw new Error("Failed to generate response.");
     }
