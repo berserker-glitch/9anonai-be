@@ -16,6 +16,11 @@ const logger_1 = require("../services/logger");
 const zod_1 = require("zod");
 const router = (0, express_1.Router)();
 // ─────────────────────────────────────────────────────────────────────────────
+// Plan guard: Contract Builder requires Basic plan or higher.
+// Superadmins always have access.
+// ─────────────────────────────────────────────────────────────────────────────
+router.use(auth_1.authenticate, (0, auth_1.requirePlan)('basic'));
+// ─────────────────────────────────────────────────────────────────────────────
 // Validation Schemas
 // ─────────────────────────────────────────────────────────────────────────────
 /** Schema for creating a new contract session */

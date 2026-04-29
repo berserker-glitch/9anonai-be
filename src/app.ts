@@ -19,6 +19,7 @@ import adminAnalyticsRouter from "./routes/admin-analytics";
 import pdfRouter from "./routes/pdf";
 import contractBuilderRouter from "./routes/contract-builder";
 import newsletterRouter from "./routes/newsletter";
+import billingRouter from "./routes/billing";
 
 // Middleware
 import { requestLogger, errorHandler, notFoundHandler } from "./middleware";
@@ -64,6 +65,15 @@ app.use(helmet({
 }));
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Paddle Webhook — raw body capture (MUST be before express.json())
+// The webhook route needs the raw Buffer for HMAC signature verification.
+// ─────────────────────────────────────────────────────────────────────────────
+app.use("/api/billing/webhook", express.raw({ type: "application/json" }), (req, _res, next) => {
+    (req as any).rawBody = req.body;
+    next();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Body Parsing Middleware
 // ─────────────────────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "2mb" }));
@@ -91,6 +101,7 @@ app.use("/api/admin/analytics", adminAnalyticsRouter); // Admin analytics
 app.use("/api/pdf", pdfRouter);        // PDF contract generation
 app.use("/api/contract-builder", contractBuilderRouter); // Contract Builder
 app.use("/api/newsletter", newsletterRouter);           // Newsletter subscriptions
+app.use("/api/billing", billingRouter);                // Billing & subscriptions (Paddle)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Health Check Endpoint

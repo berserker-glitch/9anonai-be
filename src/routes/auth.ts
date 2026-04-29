@@ -212,27 +212,55 @@ router.post("/login", authLimiter, asyncHandler(async (req: Request, res: Respon
 router.get("/me", authenticate, asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId!;
 
-    const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-            id: true,
-            email: true,
-            name: true,
-            image: true,
-            role: true,
-            personalization: true,
-            isOnboarded: true,
-            marketingSource: true,
-            feedbackDismissed: true
-        }
-    });
+    const [user, subscription] = await Promise.all([
+        prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                image: true,
+                role: true,
+                personalization: true,
+                isOnboarded: true,
+                marketingSource: true,
+                feedbackDismissed: true,
+                country: true,
+            }
+        }),
+        prisma.subscription.findUnique({
+            where: { userId },
+            select: {
+                status: true,
+                currentPeriodEnd: true,
+                cancelledAt: true,
+                plan: { select: { name: true, displayName: true, messagesPerConversation: true, contractsPerMonth: true } },
+            }
+        }),
+    ]);
 
     if (!user) {
         logger.warn(`[AUTH] User not found in /me: ${userId}`);
         throw HttpErrors.notFound("User");
     }
 
-    res.json({ user });
+    const planName = (subscription?.status === 'active' ? subscription.plan.name : 'free') ?? 'free';
+
+    res.json({
+        user: {
+            ...user,
+            plan: planName,
+            subscription: subscription ? {
+                status: subscription.status,
+                planName: subscription.plan.name,
+                planDisplayName: subscription.plan.displayName,
+                currentPeriodEnd: subscription.currentPeriodEnd,
+                cancelledAt: subscription.cancelledAt,
+                messagesPerConversation: subscription.plan.messagesPerConversation,
+                contractsPerMonth: subscription.plan.contractsPerMonth,
+            } : null,
+        }
+    });
 }));
 
 /**

@@ -22,6 +22,7 @@ const admin_analytics_1 = __importDefault(require("./routes/admin-analytics"));
 const pdf_1 = __importDefault(require("./routes/pdf"));
 const contract_builder_1 = __importDefault(require("./routes/contract-builder"));
 const newsletter_1 = __importDefault(require("./routes/newsletter"));
+const billing_1 = __importDefault(require("./routes/billing"));
 // Middleware
 const middleware_1 = require("./middleware");
 const logger_1 = require("./services/logger");
@@ -58,6 +59,14 @@ app.use((0, helmet_1.default)({
     crossOriginEmbedderPolicy: false, // Allow embedding fonts/images from CDN
 }));
 // ─────────────────────────────────────────────────────────────────────────────
+// Paddle Webhook — raw body capture (MUST be before express.json())
+// The webhook route needs the raw Buffer for HMAC signature verification.
+// ─────────────────────────────────────────────────────────────────────────────
+app.use("/api/billing/webhook", express_1.default.raw({ type: "application/json" }), (req, _res, next) => {
+    req.rawBody = req.body;
+    next();
+});
+// ─────────────────────────────────────────────────────────────────────────────
 // Body Parsing Middleware
 // ─────────────────────────────────────────────────────────────────────────────
 app.use(express_1.default.json({ limit: "2mb" }));
@@ -82,6 +91,7 @@ app.use("/api/admin/analytics", admin_analytics_1.default); // Admin analytics
 app.use("/api/pdf", pdf_1.default); // PDF contract generation
 app.use("/api/contract-builder", contract_builder_1.default); // Contract Builder
 app.use("/api/newsletter", newsletter_1.default); // Newsletter subscriptions
+app.use("/api/billing", billing_1.default); // Billing & subscriptions (Paddle)
 // ─────────────────────────────────────────────────────────────────────────────
 // Health Check Endpoint
 // ─────────────────────────────────────────────────────────────────────────────

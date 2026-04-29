@@ -10,6 +10,7 @@ import rateLimit from "express-rate-limit";
 import { getLegalAdviceStream } from "../services/lawyer";
 import { logger, logChatEvent } from "../services/logger";
 import { optionalAuth, AuthenticatedRequest } from "../middleware/auth";
+import { quotaGuard } from "../middleware/quota-guard";
 
 const router = Router();
 
@@ -70,7 +71,7 @@ import { prisma } from "../services/prisma";
  * @param {string} [req.body.chatId] - Chat ID to save the response to
  * @returns {stream} SSE stream with AI response tokens and metadata
  */
-router.post("/", optionalAuth, chatLimiter, async (req: Request, res: Response) => {
+router.post("/", optionalAuth, chatLimiter, quotaGuard, async (req: Request, res: Response) => {
     // Set up SSE headers for streaming response
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");

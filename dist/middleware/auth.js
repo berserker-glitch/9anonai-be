@@ -8,7 +8,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyToken = exports.generateToken = exports.requireSuperAdmin = exports.optionalAuth = exports.authenticate = void 0;
+exports.verifyToken = exports.generateToken = exports.requirePlan = exports.requireSuperAdmin = exports.optionalAuth = exports.authenticate = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const prisma_1 = require("../services/prisma");
 const logger_1 = require("../services/logger");
@@ -145,6 +145,60 @@ const requireSuperAdmin = async (req, res, next) => {
     }
 };
 exports.requireSuperAdmin = requireSuperAdmin;
+/**
+ * Middleware factory that requires the user to have an active subscription
+ * at the given plan level or higher.
+ * Plan hierarchy: free < basic < pro < enterprise
+ * Must be used AFTER authenticate middleware.
+ *
+ * @example
+ * router.use(authenticate, requirePlan('basic'));
+ */
+const PLAN_RANK = {
+    free: 0,
+    basic: 1,
+    pro: 2,
+    enterprise: 3,
+};
+const requirePlan = (minPlan) => {
+    return async (req, res, next) => {
+        const userId = req.userId;
+        const userRole = req.userRole;
+        if (!userId) {
+            res.status(401).json({ error: 'Authentication required' });
+            return;
+        }
+        // Superadmin always has access
+        if (userRole === 'superadmin') {
+            next();
+            return;
+        }
+        try {
+            const sub = await prisma_1.prisma.subscription.findUnique({
+                where: { userId },
+                select: { status: true, plan: { select: { name: true } } },
+            });
+            const planName = (sub?.status === 'active' ? sub.plan.name : 'free') ?? 'free';
+            const userRank = PLAN_RANK[planName] ?? 0;
+            const requiredRank = PLAN_RANK[minPlan] ?? 1;
+            if (userRank < requiredRank) {
+                res.status(403).json({
+                    error: 'plan_required',
+                    required: minPlan,
+                    current: planName,
+                    upgrade_url: '/pricing',
+                });
+                return;
+            }
+            next();
+        }
+        catch (error) {
+            logger_1.logger.error('Error checking plan requirement', { error, userId });
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    };
+};
+exports.requirePlan = requirePlan;
 /**
  * Generates a JWT token for a user.
  *

@@ -190,6 +190,66 @@ export const requireSuperAdmin = async (
 };
 
 /**
+ * Middleware factory that requires the user to have an active subscription
+ * at the given plan level or higher.
+ * Plan hierarchy: free < basic < pro < enterprise
+ * Must be used AFTER authenticate middleware.
+ *
+ * @example
+ * router.use(authenticate, requirePlan('basic'));
+ */
+const PLAN_RANK: Record<string, number> = {
+    free: 0,
+    basic: 1,
+    pro: 2,
+    enterprise: 3,
+};
+
+export const requirePlan = (minPlan: 'basic' | 'pro' | 'enterprise') => {
+    return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        const userId = (req as AuthenticatedRequest).userId;
+        const userRole = (req as AuthenticatedRequest).userRole;
+
+        if (!userId) {
+            res.status(401).json({ error: 'Authentication required' });
+            return;
+        }
+
+        // Superadmin always has access
+        if (userRole === 'superadmin') {
+            next();
+            return;
+        }
+
+        try {
+            const sub = await prisma.subscription.findUnique({
+                where: { userId },
+                select: { status: true, plan: { select: { name: true } } },
+            });
+
+            const planName = (sub?.status === 'active' ? sub.plan.name : 'free') ?? 'free';
+            const userRank = PLAN_RANK[planName] ?? 0;
+            const requiredRank = PLAN_RANK[minPlan] ?? 1;
+
+            if (userRank < requiredRank) {
+                res.status(403).json({
+                    error: 'plan_required',
+                    required: minPlan,
+                    current: planName,
+                    upgrade_url: '/pricing',
+                });
+                return;
+            }
+
+            next();
+        } catch (error) {
+            logger.error('Error checking plan requirement', { error, userId });
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    };
+};
+
+/**
  * Generates a JWT token for a user.
  * 
  * @param {string} userId - The user's ID

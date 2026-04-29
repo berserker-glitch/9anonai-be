@@ -8,7 +8,11 @@
         "dev": "ts-node src/app.ts",
         "build": "prisma generate && tsc",
         "ingest": "ts-node scripts/ingest.ts",
-        "generate-articles": "ts-node scripts/generate-articles.ts"
+        "generate-articles": "ts-node scripts/generate-articles.ts",
+        "seed": "ts-node prisma/seed.ts"
+    },
+    "prisma": {
+        "seed": "ts-node prisma/seed.ts"
     },
     "dependencies": {
         "@lancedb/lancedb": "^0.23.0",

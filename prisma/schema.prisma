@@ -23,11 +23,72 @@ model User {
   isFavorite    Boolean   @default(false)   // Admin-marked favorite user for quick filtering
   lastLoginAt   DateTime?                   // Timestamp of most recent login
   lastActiveAt  DateTime?                   // Timestamp of most recent chat message
+  country       String?                     // "MA", "FR", "ES", "BE", "NL", "CA", etc.
   createdAt     DateTime  @default(now())
   chats         Chat[]
   files         UserFile[]
   documents     GeneratedDocument[]
   contractSessions ContractSession[]
+  subscription  Subscription?
+  payments      Payment[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Billing Models
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Subscription plan definitions (seeded, not user-created) */
+model Plan {
+  id                      String         @id @default(cuid())
+  name                    String         @unique  // "free" | "basic" | "pro" | "enterprise"
+  displayName             String                   // "Majjani" | "Asasi" | "Mihani"
+  priceMAD                Int            @default(0)   // Monthly price in MAD centimes (4900 = 49 MAD)
+  priceEUR                Int            @default(0)   // Monthly price in EUR cents (499 = 4.99 EUR)
+  messagesPerConversation Int            @default(15)  // 0 = unlimited
+  contractsPerMonth       Int            @default(0)   // 0 = unlimited
+  maxSavedChats           Int            @default(10)  // 0 = unlimited
+  features                String?        @db.Text       // JSON array of feature flag strings
+  isActive                Boolean        @default(true)
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+  subscriptions           Subscription[]
+}
+
+/** Active user subscription (one per user) */
+model Subscription {
+  id                 String    @id @default(cuid())
+  userId             String    @unique
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId             String
+  plan               Plan      @relation(fields: [planId], references: [id])
+  status             String    @default("active")  // "active" | "cancelled" | "past_due" | "expired"
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelledAt        DateTime?
+  externalId         String?   @unique               // Paddle subscription ID
+  paymentProvider    String?                         // "paddle" | "manual"
+  currency           String    @default("MAD")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([externalId])
+}
+
+/** Payment records for all transactions */
+model Payment {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount          Int                              // In smallest currency unit (centimes/cents)
+  currency        String   @default("MAD")
+  status          String                           // "pending" | "completed" | "failed" | "refunded"
+  paymentProvider String                           // "paddle" | "manual"
+  externalId      String?  @unique                 // Provider's transaction ID
+  type            String                           // "subscription"
+  metadata        String?  @db.Text               // JSON: plan name, period, etc.
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Chat {

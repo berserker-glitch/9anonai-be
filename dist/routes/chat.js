@@ -14,6 +14,7 @@ const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const lawyer_1 = require("../services/lawyer");
 const logger_1 = require("../services/logger");
 const auth_1 = require("../middleware/auth");
+const quota_guard_1 = require("../middleware/quota-guard");
 const router = (0, express_1.Router)();
 // ─────────────────────────────────────────────────────────────────────────────
 // Validation Schemas
@@ -67,7 +68,7 @@ const prisma_1 = require("../services/prisma");
  * @param {string} [req.body.chatId] - Chat ID to save the response to
  * @returns {stream} SSE stream with AI response tokens and metadata
  */
-router.post("/", auth_1.optionalAuth, chatLimiter, async (req, res) => {
+router.post("/", auth_1.optionalAuth, chatLimiter, quota_guard_1.quotaGuard, async (req, res) => {
     // Set up SSE headers for streaming response
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
