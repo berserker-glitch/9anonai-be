@@ -29,7 +29,6 @@ const router = Router();
 
 const CheckoutSchema = z.object({
     plan: z.enum(['basic', 'pro']),
-    currency: z.enum(['MAD', 'EUR']).default('MAD'),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -39,7 +38,7 @@ const CheckoutSchema = z.object({
 
 router.post('/checkout', authenticate, asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId!;
-    const { plan, currency } = CheckoutSchema.parse(req.body);
+    const { plan } = CheckoutSchema.parse(req.body);
 
     const user = await prisma.user.findUnique({
         where: { id: userId },
@@ -52,7 +51,6 @@ router.post('/checkout', authenticate, asyncHandler(async (req: Request, res: Re
         userId,
         email: user.email,
         planName: plan,
-        currency,
     });
 
     res.json({ checkout_url: checkoutUrl });
@@ -74,42 +72,40 @@ router.get('/subscription', authenticate, asyncHandler(async (req: Request, res:
             currentPeriodEnd: true,
             cancelledAt: true,
             currency: true,
-            plan: {
-                select: {
-                    name: true,
-                    displayName: true,
-                    priceMAD: true,
-                    priceEUR: true,
-                    messagesPerConversation: true,
-                    contractsPerMonth: true,
-                    maxSavedChats: true,
-                },
-            },
+            planId: true,
         },
     });
 
     if (!subscription || subscription.status !== 'active') {
-        res.json({
-            plan: 'free',
-            subscription: null,
-        });
+        res.json({ plan: 'free', subscription: null });
         return;
     }
 
+    const plan = await prisma.plan.findUnique({
+        where: { id: subscription.planId },
+        select: {
+            name: true,
+            displayName: true,
+            priceUSD: true,
+            messagesPerConversation: true,
+            contractsPerMonth: true,
+            maxSavedChats: true,
+        },
+    });
+
     res.json({
-        plan: subscription.plan.name,
+        plan: plan?.name ?? 'free',
         subscription: {
             status: subscription.status,
-            planName: subscription.plan.name,
-            planDisplayName: subscription.plan.displayName,
-            priceMAD: subscription.plan.priceMAD,
-            priceEUR: subscription.plan.priceEUR,
+            planName: plan?.name,
+            planDisplayName: plan?.displayName,
+            priceUSD: plan?.priceUSD,
             currentPeriodStart: subscription.currentPeriodStart,
             currentPeriodEnd: subscription.currentPeriodEnd,
             cancelledAt: subscription.cancelledAt,
             currency: subscription.currency,
-            messagesPerConversation: subscription.plan.messagesPerConversation,
-            contractsPerMonth: subscription.plan.contractsPerMonth,
+            messagesPerConversation: plan?.messagesPerConversation,
+            contractsPerMonth: plan?.contractsPerMonth,
         },
     });
 }));

@@ -19,18 +19,12 @@ const paddle = new Paddle(process.env.PADDLE_API_KEY || 'no_key_set', {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Price IDs — set these in .env after creating prices in the Paddle dashboard
+// Price IDs — one USD price per plan, set in .env after creating in Paddle
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PRICE_IDS: Record<string, { MAD: string; EUR: string }> = {
-    basic: {
-        MAD: process.env.PADDLE_PRICE_BASIC_MAD || '',
-        EUR: process.env.PADDLE_PRICE_BASIC_EUR || '',
-    },
-    pro: {
-        MAD: process.env.PADDLE_PRICE_PRO_MAD || '',
-        EUR: process.env.PADDLE_PRICE_PRO_EUR || '',
-    },
+const PRICE_IDS: Record<string, string> = {
+    basic: process.env.PADDLE_PRICE_BASIC || '',
+    pro:   process.env.PADDLE_PRICE_PRO   || '',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,18 +53,18 @@ interface CheckoutOptions {
     userId: string;
     email: string;
     planName: 'basic' | 'pro';
-    currency: 'MAD' | 'EUR';
 }
 
 /**
  * Creates a Paddle hosted-checkout transaction and returns the checkout URL.
+ * All prices are in USD — Paddle handles currency display for the customer.
  */
 export async function createCheckoutUrl(opts: CheckoutOptions): Promise<string> {
-    const { userId, email, planName, currency } = opts;
-    const priceId = PRICE_IDS[planName]?.[currency];
+    const { userId, email, planName } = opts;
+    const priceId = PRICE_IDS[planName];
 
     if (!priceId) {
-        throw new Error(`No price ID configured for plan=${planName} currency=${currency}. Set PADDLE_PRICE_${planName.toUpperCase()}_${currency} in .env`);
+        throw new Error(`No price ID configured for plan=${planName}. Set PADDLE_PRICE_${planName.toUpperCase()} in .env`);
     }
 
     const transaction = await paddle.transactions.create({
@@ -194,7 +188,7 @@ export async function handlePaddleEvent(event: any): Promise<void> {
                 currentPeriodStart: new Date(billingPeriod.startsAt || billingPeriod.starts_at || Date.now()),
                 currentPeriodEnd: new Date(billingPeriod.endsAt || billingPeriod.ends_at || Date.now()),
                 amountCents: Number(totals.total ?? 0),
-                currency: data.currencyCode || data.currency_code || 'MAD',
+                currency: data.currencyCode || data.currency_code || 'USD',
             });
             break;
         }

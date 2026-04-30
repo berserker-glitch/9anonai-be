@@ -22,17 +22,11 @@ const paddle = new paddle_node_sdk_1.Paddle(process.env.PADDLE_API_KEY || 'no_ke
         : paddle_node_sdk_1.Environment.production,
 });
 // ─────────────────────────────────────────────────────────────────────────────
-// Price IDs — set these in .env after creating prices in the Paddle dashboard
+// Price IDs — one USD price per plan, set in .env after creating in Paddle
 // ─────────────────────────────────────────────────────────────────────────────
 const PRICE_IDS = {
-    basic: {
-        MAD: process.env.PADDLE_PRICE_BASIC_MAD || '',
-        EUR: process.env.PADDLE_PRICE_BASIC_EUR || '',
-    },
-    pro: {
-        MAD: process.env.PADDLE_PRICE_PRO_MAD || '',
-        EUR: process.env.PADDLE_PRICE_PRO_EUR || '',
-    },
+    basic: process.env.PADDLE_PRICE_BASIC || '',
+    pro: process.env.PADDLE_PRICE_PRO || '',
 };
 // ─────────────────────────────────────────────────────────────────────────────
 // Webhook verification — SDK handles HMAC automatically
@@ -52,12 +46,13 @@ async function unmarshalWebhook(rawBody, signatureHeader) {
 }
 /**
  * Creates a Paddle hosted-checkout transaction and returns the checkout URL.
+ * All prices are in USD — Paddle handles currency display for the customer.
  */
 async function createCheckoutUrl(opts) {
-    const { userId, email, planName, currency } = opts;
-    const priceId = PRICE_IDS[planName]?.[currency];
+    const { userId, email, planName } = opts;
+    const priceId = PRICE_IDS[planName];
     if (!priceId) {
-        throw new Error(`No price ID configured for plan=${planName} currency=${currency}. Set PADDLE_PRICE_${planName.toUpperCase()}_${currency} in .env`);
+        throw new Error(`No price ID configured for plan=${planName}. Set PADDLE_PRICE_${planName.toUpperCase()} in .env`);
     }
     const transaction = await paddle.transactions.create({
         items: [{ priceId, quantity: 1 }],
@@ -155,7 +150,7 @@ async function handlePaddleEvent(event) {
                 currentPeriodStart: new Date(billingPeriod.startsAt || billingPeriod.starts_at || Date.now()),
                 currentPeriodEnd: new Date(billingPeriod.endsAt || billingPeriod.ends_at || Date.now()),
                 amountCents: Number(totals.total ?? 0),
-                currency: data.currencyCode || data.currency_code || 'MAD',
+                currency: data.currencyCode || data.currency_code || 'USD',
             });
             break;
         }

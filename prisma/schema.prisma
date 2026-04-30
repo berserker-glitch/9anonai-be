@@ -42,8 +42,7 @@ model Plan {
   id                      String         @id @default(cuid())
   name                    String         @unique  // "free" | "basic" | "pro" | "enterprise"
   displayName             String                   // "Majjani" | "Asasi" | "Mihani"
-  priceMAD                Int            @default(0)   // Monthly price in MAD centimes (4900 = 49 MAD)
-  priceEUR                Int            @default(0)   // Monthly price in EUR cents (499 = 4.99 EUR)
+  priceUSD                Int            @default(0)   // Monthly price in USD cents (499 = $4.99)
   messagesPerConversation Int            @default(15)  // 0 = unlimited
   contractsPerMonth       Int            @default(0)   // 0 = unlimited
   maxSavedChats           Int            @default(10)  // 0 = unlimited
@@ -67,7 +66,7 @@ model Subscription {
   cancelledAt        DateTime?
   externalId         String?   @unique               // Paddle subscription ID
   paymentProvider    String?                         // "paddle" | "manual"
-  currency           String    @default("MAD")
+  currency           String    @default("USD")
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -80,7 +79,7 @@ model Payment {
   userId          String
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   amount          Int                              // In smallest currency unit (centimes/cents)
-  currency        String   @default("MAD")
+  currency        String   @default("USD")
   status          String                           // "pending" | "completed" | "failed" | "refunded"
   paymentProvider String                           // "paddle" | "manual"
   externalId      String?  @unique                 // Provider's transaction ID

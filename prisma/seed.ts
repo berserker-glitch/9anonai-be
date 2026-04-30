@@ -11,18 +11,16 @@ const plans = [
     {
         name: 'free',
         displayName: 'Majjani',
-        priceMAD: 0,
-        priceEUR: 0,
+        priceUSD: 0,
         messagesPerConversation: 15, // 0 = unlimited
-        contractsPerMonth: 0,        // free plan has no contract builder access
+        contractsPerMonth: 0,
         maxSavedChats: 10,           // 0 = unlimited
         features: JSON.stringify(['chat', 'blog', 'seo_pages']),
     },
     {
         name: 'basic',
         displayName: 'Asasi',
-        priceMAD: 4900,   // 49.00 MAD stored as centimes
-        priceEUR: 499,    // 4.99 EUR stored as cents
+        priceUSD: 499,               // $4.99/mo stored as cents
         messagesPerConversation: 0,  // unlimited
         contractsPerMonth: 3,
         maxSavedChats: 0,            // unlimited
@@ -31,28 +29,25 @@ const plans = [
     {
         name: 'pro',
         displayName: 'Mihani',
-        priceMAD: 14900,  // 149.00 MAD stored as centimes
-        priceEUR: 1499,   // 14.99 EUR stored as cents
+        priceUSD: 1499,              // $14.99/mo stored as cents
         messagesPerConversation: 0,  // unlimited
         contractsPerMonth: 0,        // unlimited
         maxSavedChats: 0,            // unlimited
         features: JSON.stringify([
             'chat', 'blog', 'seo_pages', 'contract_builder', 'chat_history',
-            'file_uploads', 'priority_responses', 'legal_alerts',
+            'file_uploads', 'priority_responses',
         ]),
     },
     {
         name: 'enterprise',
         displayName: 'Mouassasa',
-        priceMAD: 50000,  // 500.00 MAD minimum, stored as centimes
-        priceEUR: 4999,   // 49.99 EUR minimum, stored as cents
+        priceUSD: 0,                 // custom pricing — handled manually
         messagesPerConversation: 0,
         contractsPerMonth: 0,
         maxSavedChats: 0,
         features: JSON.stringify([
             'chat', 'blog', 'seo_pages', 'contract_builder', 'chat_history',
-            'file_uploads', 'priority_responses', 'legal_alerts',
-            'api_access', 'team_seats', 'sla',
+            'file_uploads', 'priority_responses', 'api_access', 'team_seats', 'sla',
         ]),
     },
 ];
@@ -65,8 +60,7 @@ async function main() {
             where: { name: plan.name },
             update: {
                 displayName: plan.displayName,
-                priceMAD: plan.priceMAD,
-                priceEUR: plan.priceEUR,
+                priceUSD: plan.priceUSD,
                 messagesPerConversation: plan.messagesPerConversation,
                 contractsPerMonth: plan.contractsPerMonth,
                 maxSavedChats: plan.maxSavedChats,
