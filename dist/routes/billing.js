@@ -109,17 +109,13 @@ router.post('/webhook', async (req, res) => {
         res.status(400).json({ error: 'Missing Paddle-Signature header' });
         return;
     }
-    if (!(0, billing_1.verifyPaddleWebhook)(rawBody, signatureHeader)) {
-        logger_1.logger.warn('[BILLING] Webhook signature verification failed');
-        res.status(401).json({ error: 'Invalid webhook signature' });
-        return;
-    }
     let event;
     try {
-        event = JSON.parse(rawBody.toString('utf8'));
+        event = await (0, billing_1.unmarshalWebhook)(rawBody.toString('utf8'), signatureHeader);
     }
-    catch {
-        res.status(400).json({ error: 'Invalid JSON body' });
+    catch (err) {
+        logger_1.logger.warn('[BILLING] Webhook signature verification failed', { err });
+        res.status(401).json({ error: 'Invalid webhook signature' });
         return;
     }
     try {

@@ -16,6 +16,7 @@
     },
     "dependencies": {
         "@lancedb/lancedb": "^0.23.0",
+        "@paddle/paddle-node-sdk": "^3.8.0",
         "@pdfme/generator": "^5.5.8",
         "@prisma/client": "6.19.1",
         "@types/multer": "^2.0.0",

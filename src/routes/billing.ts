@@ -17,7 +17,7 @@ import { logger } from '../services/logger';
 import {
     createCheckoutUrl,
     handlePaddleEvent,
-    verifyPaddleWebhook,
+    unmarshalWebhook,
 } from '../services/billing';
 import { z } from 'zod';
 
@@ -129,17 +129,12 @@ router.post('/webhook', async (req: Request, res: Response) => {
         return;
     }
 
-    if (!verifyPaddleWebhook(rawBody, signatureHeader)) {
-        logger.warn('[BILLING] Webhook signature verification failed');
-        res.status(401).json({ error: 'Invalid webhook signature' });
-        return;
-    }
-
     let event: any;
     try {
-        event = JSON.parse(rawBody.toString('utf8'));
-    } catch {
-        res.status(400).json({ error: 'Invalid JSON body' });
+        event = await unmarshalWebhook(rawBody.toString('utf8'), signatureHeader);
+    } catch (err) {
+        logger.warn('[BILLING] Webhook signature verification failed', { err });
+        res.status(401).json({ error: 'Invalid webhook signature' });
         return;
     }
 

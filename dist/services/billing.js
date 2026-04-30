@@ -1,107 +1,79 @@
 "use strict";
 /**
- * @fileoverview Billing service — Paddle integration.
- * Handles subscription activation, cancellation, and webhook event processing.
+ * @fileoverview Billing service — Paddle SDK integration.
+ * Uses the official @paddle/paddle-node-sdk — no manual fetch or HMAC needed.
  * @module services/billing
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PADDLE_PRICE_IDS = void 0;
-exports.verifyPaddleWebhook = verifyPaddleWebhook;
+exports.unmarshalWebhook = unmarshalWebhook;
 exports.createCheckoutUrl = createCheckoutUrl;
 exports.activateSubscription = activateSubscription;
 exports.cancelSubscription = cancelSubscription;
 exports.handlePaddleEvent = handlePaddleEvent;
+const paddle_node_sdk_1 = require("@paddle/paddle-node-sdk");
 const prisma_1 = require("./prisma");
 const logger_1 = require("./logger");
-const crypto_1 = __importDefault(require("crypto"));
-const PADDLE_WEBHOOK_SECRET = process.env.PADDLE_WEBHOOK_SECRET || '';
-const PADDLE_API_KEY = process.env.PADDLE_API_KEY || '';
-const PADDLE_SANDBOX = process.env.PADDLE_SANDBOX === 'true';
-const PADDLE_BASE_URL = PADDLE_SANDBOX
-    ? 'https://sandbox-api.paddle.com'
-    : 'https://api.paddle.com';
 // ─────────────────────────────────────────────────────────────────────────────
-// Plan price IDs (configured in Paddle dashboard)
+// Paddle client (singleton)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.PADDLE_PRICE_IDS = {
+const paddle = new paddle_node_sdk_1.Paddle(process.env.PADDLE_API_KEY || 'no_key_set', {
+    environment: process.env.PADDLE_SANDBOX === 'true'
+        ? paddle_node_sdk_1.Environment.sandbox
+        : paddle_node_sdk_1.Environment.production,
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// Price IDs — set these in .env after creating prices in the Paddle dashboard
+// ─────────────────────────────────────────────────────────────────────────────
+const PRICE_IDS = {
     basic: {
-        mad: process.env.PADDLE_PRICE_BASIC_MAD || '',
-        eur: process.env.PADDLE_PRICE_BASIC_EUR || '',
+        MAD: process.env.PADDLE_PRICE_BASIC_MAD || '',
+        EUR: process.env.PADDLE_PRICE_BASIC_EUR || '',
     },
     pro: {
-        mad: process.env.PADDLE_PRICE_PRO_MAD || '',
-        eur: process.env.PADDLE_PRICE_PRO_EUR || '',
+        MAD: process.env.PADDLE_PRICE_PRO_MAD || '',
+        EUR: process.env.PADDLE_PRICE_PRO_EUR || '',
     },
 };
 // ─────────────────────────────────────────────────────────────────────────────
-// Webhook signature verification
+// Webhook verification — SDK handles HMAC automatically
 // ─────────────────────────────────────────────────────────────────────────────
 /**
- * Verifies a Paddle webhook signature using HMAC-SHA256.
- * Paddle sends: Paddle-Signature: ts=<timestamp>;h1=<hmac>
+ * Verifies the Paddle-Signature header and returns the parsed event.
+ * Throws if the signature is invalid.
  */
-function verifyPaddleWebhook(rawBody, signatureHeader) {
-    if (!PADDLE_WEBHOOK_SECRET) {
+async function unmarshalWebhook(rawBody, signatureHeader) {
+    const secret = process.env.PADDLE_WEBHOOK_SECRET || '';
+    if (!secret) {
         logger_1.logger.warn('[BILLING] PADDLE_WEBHOOK_SECRET not set — skipping verification');
-        return true;
+        return JSON.parse(rawBody);
     }
-    try {
-        const parts = Object.fromEntries(signatureHeader.split(';').map(p => p.split('=')));
-        const ts = parts['ts'];
-        const h1 = parts['h1'];
-        if (!ts || !h1)
-            return false;
-        const payload = `${ts}:${rawBody.toString('utf8')}`;
-        const expected = crypto_1.default
-            .createHmac('sha256', PADDLE_WEBHOOK_SECRET)
-            .update(payload)
-            .digest('hex');
-        return crypto_1.default.timingSafeEqual(Buffer.from(h1), Buffer.from(expected));
-    }
-    catch {
-        return false;
-    }
+    // SDK verifies HMAC-SHA256 and returns a typed event object
+    return paddle.webhooks.unmarshal(rawBody, secret, signatureHeader);
 }
 /**
- * Creates a Paddle checkout URL for the given plan and currency.
- * Returns the hosted checkout URL to redirect the user to.
+ * Creates a Paddle hosted-checkout transaction and returns the checkout URL.
  */
 async function createCheckoutUrl(opts) {
     const { userId, email, planName, currency } = opts;
-    const priceId = exports.PADDLE_PRICE_IDS[planName]?.[currency.toLowerCase()];
+    const priceId = PRICE_IDS[planName]?.[currency];
     if (!priceId) {
-        throw new Error(`No Paddle price ID configured for plan=${planName} currency=${currency}`);
+        throw new Error(`No price ID configured for plan=${planName} currency=${currency}. Set PADDLE_PRICE_${planName.toUpperCase()}_${currency} in .env`);
     }
-    const res = await fetch(`${PADDLE_BASE_URL}/transactions`, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${PADDLE_API_KEY}`,
-            'Content-Type': 'application/json',
+    const transaction = await paddle.transactions.create({
+        items: [{ priceId, quantity: 1 }],
+        customData: { userId, planName },
+        checkout: {
+            url: `${process.env.FRONTEND_URL || 'https://9anonai.com'}/pricing?status=success`,
         },
-        body: JSON.stringify({
-            items: [{ price_id: priceId, quantity: 1 }],
-            customer: { email },
-            custom_data: { userId, planName },
-            checkout: { url: `${process.env.FRONTEND_URL}/pricing?status=success` },
-        }),
     });
-    if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Paddle checkout error: ${err}`);
-    }
-    const data = await res.json();
-    return data.data.checkout.url;
+    const url = transaction.checkout?.url;
+    if (!url)
+        throw new Error('Paddle did not return a checkout URL');
+    return url;
 }
 // ─────────────────────────────────────────────────────────────────────────────
-// Subscription management
+// Subscription lifecycle — called from webhook handler
 // ─────────────────────────────────────────────────────────────────────────────
-/**
- * Activates or renews a subscription for a user.
- * Called when Paddle fires subscription.activated or subscription.renewed.
- */
 async function activateSubscription(opts) {
     const { userId, planName, paddleSubscriptionId, paddleTransactionId, currentPeriodStart, currentPeriodEnd, amountCents, currency } = opts;
     const plan = await prisma_1.prisma.plan.findUnique({ where: { name: planName } });
@@ -110,7 +82,6 @@ async function activateSubscription(opts) {
         return;
     }
     await prisma_1.prisma.$transaction([
-        // Upsert subscription
         prisma_1.prisma.subscription.upsert({
             where: { userId },
             create: {
@@ -133,7 +104,6 @@ async function activateSubscription(opts) {
                 currency,
             },
         }),
-        // Record payment
         ...(paddleTransactionId ? [prisma_1.prisma.payment.create({
                 data: {
                     userId,
@@ -149,50 +119,43 @@ async function activateSubscription(opts) {
     ]);
     logger_1.logger.info(`[BILLING] Subscription activated | user=${userId} plan=${planName}`);
 }
-/**
- * Cancels a subscription. Sets status to 'cancelled' but keeps access
- * until currentPeriodEnd (Paddle handles this grace period).
- */
 async function cancelSubscription(opts) {
     const { userId, paddleSubscriptionId, cancelledAt } = opts;
-    const where = userId
-        ? { userId }
-        : { externalId: paddleSubscriptionId };
-    await prisma_1.prisma.subscription.updateMany({
-        where,
-        data: { status: 'cancelled', cancelledAt },
-    });
+    const where = userId ? { userId } : { externalId: paddleSubscriptionId };
+    await prisma_1.prisma.subscription.updateMany({ where, data: { status: 'cancelled', cancelledAt } });
     logger_1.logger.info(`[BILLING] Subscription cancelled | paddleId=${paddleSubscriptionId}`);
 }
 // ─────────────────────────────────────────────────────────────────────────────
 // Webhook event router
 // ─────────────────────────────────────────────────────────────────────────────
-/**
- * Routes an incoming Paddle webhook event to the appropriate handler.
- */
 async function handlePaddleEvent(event) {
-    const type = event.event_type || event.notification_type || '';
+    const type = event.eventType || event.event_type || '';
     const data = event.data || {};
     logger_1.logger.info(`[BILLING] Paddle event: ${type}`);
-    const userId = data.custom_data?.userId;
-    const planName = data.custom_data?.planName;
-    const subId = data.id || data.subscription_id || '';
+    const customData = data.customData || data.custom_data || {};
+    const userId = customData.userId;
+    const planName = customData.planName;
+    const subId = data.id || data.subscriptionId || data.subscription_id || '';
     switch (type) {
         case 'subscription.activated':
         case 'subscription.renewed': {
             if (!userId || !planName) {
-                logger_1.logger.warn('[BILLING] Missing userId/planName in custom_data', { data });
+                logger_1.logger.warn('[BILLING] Missing userId/planName in customData', { customData });
                 return;
             }
+            const billingPeriod = data.currentBillingPeriod || data.current_billing_period || {};
+            const totals = data.recurringTransactionDetails?.totals
+                || data.recurring_transaction_details?.totals
+                || {};
             await activateSubscription({
                 userId,
                 planName,
                 paddleSubscriptionId: subId,
-                paddleTransactionId: data.transaction_id,
-                currentPeriodStart: new Date(data.current_billing_period?.starts_at || Date.now()),
-                currentPeriodEnd: new Date(data.current_billing_period?.ends_at || Date.now()),
-                amountCents: data.recurring_transaction_details?.totals?.total ?? 0,
-                currency: data.currency_code || 'MAD',
+                paddleTransactionId: data.transactionId || data.transaction_id,
+                currentPeriodStart: new Date(billingPeriod.startsAt || billingPeriod.starts_at || Date.now()),
+                currentPeriodEnd: new Date(billingPeriod.endsAt || billingPeriod.ends_at || Date.now()),
+                amountCents: Number(totals.total ?? 0),
+                currency: data.currencyCode || data.currency_code || 'MAD',
             });
             break;
         }
@@ -200,7 +163,7 @@ async function handlePaddleEvent(event) {
             await cancelSubscription({
                 userId,
                 paddleSubscriptionId: subId,
-                cancelledAt: new Date(data.cancelled_at || Date.now()),
+                cancelledAt: new Date(data.cancelledAt || data.cancelled_at || Date.now()),
             });
             break;
         }
