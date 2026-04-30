@@ -132,8 +132,8 @@ async function handlePaddleEvent(event) {
     const planName = customData.planName;
     const subId = data.id || data.subscriptionId || data.subscription_id || '';
     switch (type) {
-        case 'subscription.activated':
-        case 'subscription.renewed': {
+        // Fired when a subscription first becomes active after payment
+        case 'subscription.activated': {
             if (!userId || !planName) {
                 logger_1.logger.warn('[BILLING] Missing userId/planName in customData', { customData });
                 return;
@@ -154,11 +154,34 @@ async function handlePaddleEvent(event) {
             });
             break;
         }
-        case 'subscription.cancelled': {
+        // Fired on every billing period change — this is how Paddle signals renewals
+        case 'subscription.updated': {
+            const scheduledChange = data.scheduledChange || data.scheduled_change;
+            // Ignore updates that are just scheduling a future cancellation/pause
+            if (scheduledChange && !userId)
+                break;
+            if (!userId || !planName)
+                break;
+            const billingPeriod = data.currentBillingPeriod || data.current_billing_period || {};
+            if (!billingPeriod.startsAt && !billingPeriod.starts_at)
+                break; // not a renewal
+            await activateSubscription({
+                userId,
+                planName,
+                paddleSubscriptionId: subId,
+                currentPeriodStart: new Date(billingPeriod.startsAt || billingPeriod.starts_at),
+                currentPeriodEnd: new Date(billingPeriod.endsAt || billingPeriod.ends_at),
+                amountCents: 0, // amount recorded via transaction, not subscription update
+                currency: data.currencyCode || data.currency_code || 'USD',
+            });
+            break;
+        }
+        // Paddle sends "canceled" (one l)
+        case 'subscription.canceled': {
             await cancelSubscription({
                 userId,
                 paddleSubscriptionId: subId,
-                cancelledAt: new Date(data.cancelledAt || data.cancelled_at || Date.now()),
+                cancelledAt: new Date(data.canceledAt || data.canceled_at || data.cancelledAt || Date.now()),
             });
             break;
         }
