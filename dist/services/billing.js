@@ -57,9 +57,6 @@ async function createCheckoutUrl(opts) {
     const transaction = await paddle.transactions.create({
         items: [{ priceId, quantity: 1 }],
         customData: { userId, planName },
-        checkout: {
-            url: `${process.env.FRONTEND_URL || 'https://9anonai.com'}/pricing?status=success`,
-        },
     });
     const url = transaction.checkout?.url;
     if (!url)

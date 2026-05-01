@@ -467,7 +467,7 @@ router.post("/:id/share", auth_1.authenticate, (0, error_handler_1.asyncHandler)
     logger_1.logger.info(`[CHATS] Share token generated for chat ${id}`);
     res.json({
         shareToken: token,
-        shareUrl: `${process.env.FRONTEND_URL || "https://9anonai.com"}/shared/${token}`,
+        shareUrl: `${(process.env.CORS_ORIGINS || "https://9anonai.com").split(',')[0]}/shared/${token}`,
     });
 }));
 /**
