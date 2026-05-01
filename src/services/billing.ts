@@ -67,12 +67,11 @@ export async function createCheckoutUrl(opts: CheckoutOptions): Promise<string> 
         throw new Error(`No price ID configured for plan=${planName}. Set PADDLE_PRICE_${planName.toUpperCase()} in .env`);
     }
 
+    const returnUrl = process.env.PADDLE_RETURN_URL;
     const transaction = await paddle.transactions.create({
         items: [{ priceId, quantity: 1 }],
         customData: { userId, planName } as any,
-        checkout: {
-            url: `${(process.env.CORS_ORIGINS || 'https://9anonai.com').split(',')[0]}/pricing?status=success`,
-        } as any,
+        ...(returnUrl ? { checkout: { url: returnUrl } as any } : {}),
     } as any);
 
     const url = (transaction as any).checkout?.url;
