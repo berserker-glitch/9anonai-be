@@ -71,7 +71,7 @@ export async function createCheckoutUrl(opts: CheckoutOptions): Promise<string> 
         items: [{ priceId, quantity: 1 }],
         customData: { userId, planName } as any,
         checkout: {
-            url: `${process.env.FRONTEND_URL || 'https://9anonai.com'}/pricing?status=success`,
+            url: `${(process.env.CORS_ORIGINS || 'https://9anonai.com').split(',')[0]}/pricing?status=success`,
         } as any,
     } as any);
 
