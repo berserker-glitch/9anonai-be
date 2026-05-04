@@ -35,6 +35,9 @@ router.get("/users", auth_1.authenticate, auth_1.requireSuperAdmin, (0, error_ha
             createdAt: true,
             marketingSource: true,
             googleId: true,
+            referredBy: {
+                select: { id: true, email: true, name: true }
+            },
             _count: {
                 select: {
                     chats: true
@@ -74,7 +77,10 @@ router.get("/users", auth_1.authenticate, auth_1.requireSuperAdmin, (0, error_ha
             authMethod: user.googleId ? "google" : "email",
             conversationCount: user._count.chats,
             messageCount: user.chats.reduce((total, chat) => total + chat._count.messages, 0),
-            lastActive: new Date(maxUpdatedAt).toISOString()
+            lastActive: new Date(maxUpdatedAt).toISOString(),
+            referredBy: user.referredBy
+                ? { id: user.referredBy.id, email: user.referredBy.email, name: user.referredBy.name }
+                : null,
         };
     });
     (0, logger_1.logDbOperation)("findMany", "User", true, `Retrieved ${users.length} users`);

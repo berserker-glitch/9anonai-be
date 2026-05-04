@@ -38,6 +38,9 @@ router.get("/users", authenticate, requireSuperAdmin, asyncHandler(async (req: R
             createdAt: true,
             marketingSource: true,
             googleId: true,
+            referredBy: {
+                select: { id: true, email: true, name: true }
+            },
             _count: {
                 select: {
                     chats: true
@@ -79,7 +82,10 @@ router.get("/users", authenticate, requireSuperAdmin, asyncHandler(async (req: R
             authMethod: user.googleId ? "google" : "email",
             conversationCount: user._count.chats,
             messageCount: user.chats.reduce((total, chat) => total + chat._count.messages, 0),
-            lastActive: new Date(maxUpdatedAt).toISOString()
+            lastActive: new Date(maxUpdatedAt).toISOString(),
+            referredBy: user.referredBy
+                ? { id: user.referredBy.id, email: user.referredBy.email, name: user.referredBy.name }
+                : null,
         };
     });
 
