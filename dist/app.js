@@ -23,6 +23,7 @@ const pdf_1 = __importDefault(require("./routes/pdf"));
 const contract_builder_1 = __importDefault(require("./routes/contract-builder"));
 const newsletter_1 = __importDefault(require("./routes/newsletter"));
 const billing_1 = __importDefault(require("./routes/billing"));
+const referrals_1 = __importDefault(require("./routes/referrals"));
 // Middleware
 const middleware_1 = require("./middleware");
 const logger_1 = require("./services/logger");
@@ -92,6 +93,7 @@ app.use("/api/pdf", pdf_1.default); // PDF contract generation
 app.use("/api/contract-builder", contract_builder_1.default); // Contract Builder
 app.use("/api/newsletter", newsletter_1.default); // Newsletter subscriptions
 app.use("/api/billing", billing_1.default); // Billing & subscriptions (Paddle)
+app.use("/api/referrals", referrals_1.default); // Referral system
 // ─────────────────────────────────────────────────────────────────────────────
 // Health Check Endpoint
 // ─────────────────────────────────────────────────────────────────────────────
