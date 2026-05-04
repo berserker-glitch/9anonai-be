@@ -24,6 +24,9 @@ model User {
   lastLoginAt   DateTime?                   // Timestamp of most recent login
   lastActiveAt  DateTime?                   // Timestamp of most recent chat message
   country       String?                     // "MA", "FR", "ES", "BE", "NL", "CA", etc.
+  referralCode    String?   @unique          // User's shareable referral code (8-char hex)
+  referredById    String?                    // ID of user who referred this user
+  referralCredits Int       @default(0)      // Credits earned from referrals (redeemable for free months at launch)
   createdAt     DateTime  @default(now())
   chats         Chat[]
   files         UserFile[]
@@ -31,6 +34,8 @@ model User {
   contractSessions ContractSession[]
   subscription  Subscription?
   payments      Payment[]
+  referredBy    User?     @relation("UserReferrals", fields: [referredById], references: [id])
+  referrals     User[]    @relation("UserReferrals")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "crypto";
 import rateLimit from "express-rate-limit";
 import { prisma } from "../services/prisma";
 import { logger, logAuthEvent } from "../services/logger";
@@ -35,6 +36,7 @@ const RegisterSchema = z.object({
         .regex(/[a-z]/, "Password must contain at least one lowercase letter")
         .regex(/[0-9]/, "Password must contain at least one number"),
     name: z.string().optional(),
+    referralCode: z.string().optional(),
 });
 
 /**
@@ -89,6 +91,19 @@ const authLimiter = rateLimit({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Generates a unique 8-character hex referral code for a new user. */
+async function generateUniqueReferralCode(): Promise<string> {
+    while (true) {
+        const code = randomBytes(4).toString("hex").toUpperCase();
+        const existing = await prisma.user.findUnique({ where: { referralCode: code } });
+        if (!existing) return code;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Routes
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -104,7 +119,7 @@ const authLimiter = rateLimit({
  * @returns {object} 400 - Validation error or user already exists
  */
 router.post("/register", authLimiter, asyncHandler(async (req: Request, res: Response) => {
-    const { email, password, name } = RegisterSchema.parse(req.body);
+    const { email, password, name, referralCode: incomingRefCode } = RegisterSchema.parse(req.body);
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -116,10 +131,26 @@ router.post("/register", authLimiter, asyncHandler(async (req: Request, res: Res
     // Hash password with bcrypt
     const hashedPassword = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
+    // Resolve referrer (if a referral code was provided)
+    let referrerId: string | null = null;
+    if (incomingRefCode) {
+        const referrer = await prisma.user.findUnique({ where: { referralCode: incomingRefCode } });
+        if (referrer) referrerId = referrer.id;
+    }
+
+    // Generate a unique referral code for the new user
+    const newReferralCode = await generateUniqueReferralCode();
+
     // Create new user
     const user = await prisma.user.create({
-        data: { email, password: hashedPassword, name },
+        data: { email, password: hashedPassword, name, referralCode: newReferralCode, referredById: referrerId ?? undefined },
     });
+
+    // Credit the referrer (non-blocking)
+    if (referrerId) {
+        prisma.user.update({ where: { id: referrerId }, data: { referralCredits: { increment: 1 } } }).catch(() => {});
+        logger.info(`[REFERRALS] User ${user.id} referred by ${referrerId}`);
+    }
 
     // Generate JWT token
     const token = generateToken(user.id, user.email, user.role);
@@ -395,7 +426,7 @@ router.post("/change-password", authenticate, authLimiter, asyncHandler(async (r
  * @returns {object} 400 - Invalid or missing credential
  */
 router.post("/google", authLimiter, asyncHandler(async (req: Request, res: Response) => {
-    const { credential } = req.body;
+    const { credential, referralCode: incomingRefCode } = req.body;
     if (!credential) {
         throw HttpErrors.badRequest("Google credential is required");
     }
@@ -430,6 +461,15 @@ router.post("/google", authLimiter, asyncHandler(async (req: Request, res: Respo
                 data: { googleId },
             });
         } else {
+            // Resolve referrer for new Google accounts
+            let referrerId: string | null = null;
+            if (incomingRefCode) {
+                const referrer = await prisma.user.findUnique({ where: { referralCode: incomingRefCode } });
+                if (referrer) referrerId = referrer.id;
+            }
+
+            const newReferralCode = await generateUniqueReferralCode();
+
             // Create a new Google-only account
             user = await prisma.user.create({
                 data: {
@@ -438,8 +478,16 @@ router.post("/google", authLimiter, asyncHandler(async (req: Request, res: Respo
                     googleId,
                     name: name ?? null,
                     image: picture ?? null,
+                    referralCode: newReferralCode,
+                    referredById: referrerId ?? undefined,
                 },
             });
+
+            // Credit the referrer (non-blocking)
+            if (referrerId) {
+                prisma.user.update({ where: { id: referrerId }, data: { referralCredits: { increment: 1 } } }).catch(() => {});
+                logger.info(`[REFERRALS] User ${user.id} referred by ${referrerId} (Google)`);
+            }
 
             // Send welcome email (fire-and-forget)
             sendWelcomeEmail(email!, name).catch((err) =>
