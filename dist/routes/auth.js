@@ -11,6 +11,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const zod_1 = require("zod");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const crypto_1 = require("crypto");
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const prisma_1 = require("../services/prisma");
 const logger_1 = require("../services/logger");
@@ -32,7 +33,15 @@ const RegisterSchema = zod_1.z.object({
         .regex(/[a-z]/, "Password must contain at least one lowercase letter")
         .regex(/[0-9]/, "Password must contain at least one number"),
     name: zod_1.z.string().optional(),
+    referralCode: zod_1.z.string().optional(),
 });
+async function generateUniqueReferralCode() {
+    while (true) {
+        const code = (0, crypto_1.randomBytes)(4).toString("hex").toUpperCase();
+        const existing = await prisma_1.prisma.user.findUnique({ where: { referralCode: code } });
+        if (!existing) return code;
+    }
+}
 /**
  * Schema for user login request body.
  */
@@ -93,7 +102,7 @@ const authLimiter = (0, express_rate_limit_1.default)({
  * @returns {object} 400 - Validation error or user already exists
  */
 router.post("/register", authLimiter, (0, error_handler_1.asyncHandler)(async (req, res) => {
-    const { email, password, name } = RegisterSchema.parse(req.body);
+    const { email, password, name, referralCode: incomingRefCode } = RegisterSchema.parse(req.body);
     // Check if user already exists
     const existingUser = await prisma_1.prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -102,10 +111,23 @@ router.post("/register", authLimiter, (0, error_handler_1.asyncHandler)(async (r
     }
     // Hash password with bcrypt
     const hashedPassword = await bcryptjs_1.default.hash(password, BCRYPT_SALT_ROUNDS);
+    // Resolve referrer (if a referral code was provided)
+    let referrerId = null;
+    if (incomingRefCode) {
+        const referrer = await prisma_1.prisma.user.findUnique({ where: { referralCode: incomingRefCode } });
+        if (referrer) referrerId = referrer.id;
+    }
+    // Generate a unique referral code for the new user
+    const newReferralCode = await generateUniqueReferralCode();
     // Create new user
     const user = await prisma_1.prisma.user.create({
-        data: { email, password: hashedPassword, name },
+        data: { email, password: hashedPassword, name, referralCode: newReferralCode, referredById: referrerId ?? undefined },
     });
+    // Credit the referrer (non-blocking)
+    if (referrerId) {
+        prisma_1.prisma.user.update({ where: { id: referrerId }, data: { referralCredits: { increment: 1 } } }).catch(() => {});
+        logger_1.logger.info(`[REFERRALS] User ${user.id} referred by ${referrerId}`);
+    }
     // Generate JWT token
     const token = (0, auth_1.generateToken)(user.id, user.email, user.role);
     (0, logger_1.logAuthEvent)("register", user.id, true, `New user registered: ${email}`);
@@ -339,6 +361,7 @@ router.post("/google", authLimiter, (0, error_handler_1.asyncHandler)(async (req
         throw error_handler_1.HttpErrors.unauthorized("Invalid Google token");
     }
     const { sub: googleId, email, name, picture } = payload;
+    const { referralCode: incomingRefCode } = req.body;
     // Look up by googleId first, then fall back to email (link existing account)
     let user = await prisma_1.prisma.user.findUnique({ where: { googleId } });
     if (!user) {
@@ -351,6 +374,13 @@ router.post("/google", authLimiter, (0, error_handler_1.asyncHandler)(async (req
             });
         }
         else {
+            // Resolve referrer for new Google accounts
+            let referrerId = null;
+            if (incomingRefCode) {
+                const referrer = await prisma_1.prisma.user.findUnique({ where: { referralCode: incomingRefCode } });
+                if (referrer) referrerId = referrer.id;
+            }
+            const newReferralCode = await generateUniqueReferralCode();
             // Create a new Google-only account
             user = await prisma_1.prisma.user.create({
                 data: {
@@ -359,8 +389,15 @@ router.post("/google", authLimiter, (0, error_handler_1.asyncHandler)(async (req
                     googleId,
                     name: name ?? null,
                     image: picture ?? null,
+                    referralCode: newReferralCode,
+                    referredById: referrerId ?? undefined,
                 },
             });
+            // Credit the referrer (non-blocking)
+            if (referrerId) {
+                prisma_1.prisma.user.update({ where: { id: referrerId }, data: { referralCredits: { increment: 1 } } }).catch(() => {});
+                logger_1.logger.info(`[REFERRALS] User ${user.id} referred by ${referrerId} (Google)`);
+            }
             // Send welcome email (fire-and-forget)
             (0, email_1.sendWelcomeEmail)(email, name).catch((err) => logger_1.logger.error("[AUTH] Failed to send welcome email", { error: err?.message }));
             (0, logger_1.logAuthEvent)("register", user.id, true, `New user via Google: ${email}`);
