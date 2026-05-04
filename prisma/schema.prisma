@@ -23,11 +23,16 @@ model User {
   isFavorite    Boolean   @default(false)   // Admin-marked favorite user for quick filtering
   lastLoginAt   DateTime?                   // Timestamp of most recent login
   lastActiveAt  DateTime?                   // Timestamp of most recent chat message
+  referralCode    String?   @unique          // User's shareable referral code (8-char hex)
+  referredById    String?                    // ID of user who referred this user
+  referralCredits Int       @default(0)      // Credits earned from referrals (redeemable for free months at launch)
   createdAt     DateTime  @default(now())
   chats         Chat[]
   files         UserFile[]
   documents     GeneratedDocument[]
   contractSessions ContractSession[]
+  referredBy    User?     @relation("UserReferrals", fields: [referredById], references: [id])
+  referrals     User[]    @relation("UserReferrals")
 }
 
 model Chat {

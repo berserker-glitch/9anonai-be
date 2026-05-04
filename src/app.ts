@@ -19,6 +19,7 @@ import adminAnalyticsRouter from "./routes/admin-analytics";
 import pdfRouter from "./routes/pdf";
 import contractBuilderRouter from "./routes/contract-builder";
 import newsletterRouter from "./routes/newsletter";
+import referralsRouter from "./routes/referrals";
 
 // Middleware
 import { requestLogger, errorHandler, notFoundHandler } from "./middleware";
@@ -91,6 +92,7 @@ app.use("/api/admin/analytics", adminAnalyticsRouter); // Admin analytics
 app.use("/api/pdf", pdfRouter);        // PDF contract generation
 app.use("/api/contract-builder", contractBuilderRouter); // Contract Builder
 app.use("/api/newsletter", newsletterRouter);           // Newsletter subscriptions
+app.use("/api/referrals", referralsRouter);            // Referral system
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Health Check Endpoint
