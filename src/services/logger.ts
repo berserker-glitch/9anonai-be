@@ -52,13 +52,15 @@ const devFormat = winston.format.combine(
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
     winston.format.colorize({ all: true }),
     winston.format.printf((info) => {
-        const { timestamp, level, message, stack } = info as {
+        const { timestamp, level, message, stack, ...meta } = info as {
             timestamp?: string;
             level: string;
             message: string;
-            stack?: string
+            stack?: string;
+            [key: string]: unknown;
         };
-        return `${timestamp} [${level}] ${message}${stack ? '\n' + stack : ''}`;
+        const metaStr = Object.keys(meta).length ? ' ' + JSON.stringify(meta, null, 0) : '';
+        return `${timestamp} [${level}] ${message}${metaStr}${stack ? '\n' + stack : ''}`;
     })
 );
 
